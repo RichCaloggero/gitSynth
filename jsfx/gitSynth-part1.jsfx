@@ -1,7 +1,8 @@
-desc:gitSynth Part 1 - processed guitar (step 1: envelope filter)
+desc:gitSynth Part 1 - processed guitar (step 2: envelope reshaping)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
-// Stages: input high-pass -> envelope follower -> envelope-swept resonant
-// state-variable filter -> dry/wet -> output level.
+// Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
+// -> envelope-swept resonant state-variable filter -> dry/wet -> output level.
+// The filter sweep follows picking strength before reshaping.
 
 slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
 slider2:depth_oct=3<0,6,0.1>Sweep depth (octaves)
@@ -13,6 +14,10 @@ slider7:reso=50<0,100,1>Resonance (%)
 slider8:mode=0<0,2,1{Low-pass,Band-pass,High-pass}>Filter type
 slider9:mix=100<0,100,1>Dry/wet (%)
 slider10:out_db=0<-24,12,0.1>Output level (dB)
+slider11:swell_ms=1<1,2000,1:log>Note attack time (ms)
+slider12:sustain=0<0,100,1>Sustain (%)
+slider13:env_mode=0<0,1,1{Follow guitar,Hold}>Envelope mode
+slider14:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
 
 in_pin:Guitar
 out_pin:Left
@@ -23,6 +28,9 @@ HP_HZ = 70;          // input high-pass; also removes DC
 FLOOR_DB = -48;      // envelope level that gives no sweep
 RANGE_DB = 48;       // envelope span from no sweep to full sweep
 SMOOTH_MS = 10;      // slider smoothing, avoids zipper noise
+REF_DB = -18;        // level that sustain pulls notes towards
+MAX_GAIN_DB = 30;    // most that sustain will boost a quiet note
+GATE_HYST_DB = 6;    // gate closes this far below its threshold
 
 smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
 nyq_limit = 0.45 * srate;
@@ -35,8 +43,20 @@ hp_a2 = hp_g * hp_a1;
 hp_a3 = hp_g * hp_a2;
 hp_ic1 = hp_ic2 = 0;
 
+// Fixed time constants for the reshaping detectors.
+fast_att_c = 1 - exp(-1 / (0.001 * srate));      // 1 ms
+fast_rel_c = 1 - exp(-1 / (0.05 * srate));       // 50 ms
+level_att_c = 1 - exp(-1 / (0.001 * srate));     // 1 ms: catches the pick, so no pop
+level_rel_c = 1 - exp(-1 / (0.2 * srate));       // 200 ms: little ripple on low E
+gate_att_c = 1 - exp(-1 / (0.002 * srate));      // 2 ms
+gate_rel_c = 1 - exp(-1 / (0.15 * srate));       // 150 ms
+
 env = 0;
 f_ic1 = f_ic2 = 0;
+env_fast = env_slow = 0;
+level = 0;
+gate_open = 0;
+gate_gain = 0;
 
 // Start smoothed values at their targets so nothing sweeps on load.
 first = 1;
@@ -44,6 +64,7 @@ first = 1;
 @slider
 att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
 rel_c = 1 - exp(-1 / (rel_ms * 0.001 * srate));
+swell_c = 1 - exp(-1 / (swell_ms * 0.001 * srate));
 q = 0.5 * pow(40, reso / 100);          // Q from 0.5 to 20
 t_k = 1 / q;
 t_comp = min(1, 1 / sqrt(q / 0.707));   // tame the resonant peak
@@ -51,9 +72,10 @@ t_cut = log(cutoff_hz) / log(2);        // base cutoff in octaves
 t_depth = direction ? -depth_oct : depth_oct;
 t_wet = mix / 100;
 t_out = 10 ^ (out_db / 20);
+t_sus = env_mode ? 1 : sustain / 100;   // Hold is full sustain
 first ? (
   k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
-  wet = t_wet; outg = t_out;
+  wet = t_wet; outg = t_out; sus = t_sus;
   first = 0;
 );
 
@@ -68,7 +90,7 @@ hp_ic1 = 2 * v1 - hp_ic1;
 hp_ic2 = 2 * v2 - hp_ic2;
 x = x - hp_k * v1 - v2;
 
-// Envelope follower: peak detector with separate attack and release.
+// Envelope follower for the sweep: peak detector with separate attack and release.
 a = abs(x);
 env += (a > env ? att_c : rel_c) * (a - env);
 
@@ -79,25 +101,44 @@ cut += smooth * (t_cut - cut);
 depth += smooth * (t_depth - depth);
 wet += smooth * (t_wet - wet);
 outg += smooth * (t_out - outg);
+sus += smooth * (t_sus - sus);
 
-// Sweep amount 0..1 from the envelope level in dB.
+// Swell: a slow copy of a fast envelope rises at the note attack time but
+// falls with it at once, so their ratio fades each new attack in.
+env_fast += (a > env_fast ? fast_att_c : fast_rel_c) * (a - env_fast);
+env_slow += (env_fast > env_slow ? swell_c : 1) * (env_fast - env_slow);
+swell_gain = env_slow / (env_fast + 0.000000001);
+
+// Sustain and gate, from the peak level before the swell.
+level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level_db = 20 * log10(level + 0.0000000001);
+sus_db = min(MAX_GAIN_DB, sus * (REF_DB - level_db));
+gate_open ? (
+  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
+) : (
+  level_db > gate_db ? gate_open = 1;
+);
+gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
+
+shaped = x * swell_gain * 10 ^ (sus_db / 20) * gate_gain;
+
+// Envelope-swept state-variable filter (trapezoidal, stable when modulated).
 env_db = 20 * log10(env + 0.0000001) + sens_db;
 amt = max(0, min(1, (env_db - FLOOR_DB) / RANGE_DB));
 fc = 2 ^ (cut + depth * amt);
 fc = max(20, min(nyq_limit, fc));
 
-// Envelope-swept state-variable filter (trapezoidal, stable when modulated).
 g = tan($pi * fc / srate);
 a1 = 1 / (1 + g * (g + k));
 a2 = g * a1;
 a3 = g * a2;
-v3 = x - f_ic2;
+v3 = shaped - f_ic2;
 v1 = a1 * f_ic1 + a2 * v3;
 v2 = f_ic2 + a2 * f_ic1 + a3 * v3;
 f_ic1 = 2 * v1 - f_ic1;
 f_ic2 = 2 * v2 - f_ic2;
 // Band-pass is unity gain at its peak; low- and high-pass get the compensation.
-y = mode == 1 ? v1 * k : (mode == 0 ? v2 : x - k * v1 - v2) * comp;
+y = mode == 1 ? v1 * k : (mode == 0 ? v2 : shaped - k * v1 - v2) * comp;
 
 y = (x + wet * (y - x)) * outg;
 spl0 = spl1 = y;
