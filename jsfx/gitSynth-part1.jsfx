@@ -1,7 +1,8 @@
-desc:gitSynth Part 1 - processed guitar (step 2: envelope reshaping)
+desc:gitSynth Part 1 - processed guitar (step 3: waveshaper)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
 // Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
-// -> envelope-swept resonant state-variable filter -> dry/wet -> output level.
+// -> waveshaper -> envelope-swept resonant state-variable filter
+// -> dry/wet -> output level.
 // The filter sweep follows picking strength before reshaping.
 
 slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
@@ -18,6 +19,9 @@ slider11:swell_ms=1<1,2000,1:log>Note attack time (ms)
 slider12:sustain=0<0,100,1>Sustain (%)
 slider13:env_mode=0<0,1,1{Follow guitar,Hold}>Envelope mode
 slider14:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
+slider15:drive_db=0<0,36,0.5>Drive (dB)
+slider16:shape=0<0,2,1{Soft clip,Asymmetric,Wave fold}>Shaper type
+slider17:shaper_mix=100<0,100,1>Shaper mix (%)
 
 in_pin:Guitar
 out_pin:Left
@@ -31,6 +35,8 @@ SMOOTH_MS = 10;      // slider smoothing, avoids zipper noise
 REF_DB = -18;        // level that sustain pulls notes towards
 MAX_GAIN_DB = 30;    // most that sustain will boost a quiet note
 GATE_HYST_DB = 6;    // gate closes this far below its threshold
+SHAPER_REF = 0.25;   // typical level (-12 dBFS) kept steady as drive rises
+ASYM_BIAS = 0.4;     // offset for the asymmetric shaper; gives even harmonics
 
 smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
 nyq_limit = 0.45 * srate;
@@ -58,6 +64,25 @@ level = 0;
 gate_open = 0;
 gate_gain = 0;
 
+// DC blocker after the shaper, about 20 Hz.
+dc_r = exp(-2 * $pi * 20 / srate);
+dc_x1 = dc_y1 = 0;
+
+function soft_tanh(u) local(e) ( e = exp(2 * max(-40, min(40, u))); (e - 1) / (e + 1); );
+
+// Shaper curve; the result is 0 at 0 for every type.
+function shaper(u) (
+  shape == 0 ? soft_tanh(u) :
+  shape == 1 ? soft_tanh(u + ASYM_BIAS) - soft_tanh(ASYM_BIAS) :
+  sin(u);
+);
+
+// Typical output size for inputs from -v to v (fold: its largest output;
+// otherwise the average of the two sides, which differ for Asymmetric).
+function shaper_peak(v) (
+  shape == 2 ? sin(min(v, $pi / 2)) : (shaper(v) - shaper(-v)) / 2;
+);
+
 // Start smoothed values at their targets so nothing sweeps on load.
 first = 1;
 
@@ -73,9 +98,15 @@ t_depth = direction ? -depth_oct : depth_oct;
 t_wet = mix / 100;
 t_out = 10 ^ (out_db / 20);
 t_sus = env_mode ? 1 : sustain / 100;   // Hold is full sustain
+// Drive of 0 dB bypasses the shaper; otherwise keep a -12 dBFS signal at
+// about the same level whatever the drive.
+t_drive = 10 ^ (drive_db / 20);
+t_scomp = SHAPER_REF / shaper_peak(t_drive * SHAPER_REF);
+t_smix = drive_db > 0 ? shaper_mix / 100 : 0;
 first ? (
   k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
   wet = t_wet; outg = t_out; sus = t_sus;
+  drive = t_drive; smix = t_smix; scomp = t_scomp;
   first = 0;
 );
 
@@ -102,6 +133,9 @@ depth += smooth * (t_depth - depth);
 wet += smooth * (t_wet - wet);
 outg += smooth * (t_out - outg);
 sus += smooth * (t_sus - sus);
+drive += smooth * (t_drive - drive);
+smix += smooth * (t_smix - smix);
+scomp += smooth * (t_scomp - scomp);
 
 // Swell: a slow copy of a fast envelope rises at the note attack time but
 // falls with it at once, so their ratio fades each new attack in.
@@ -121,6 +155,14 @@ gate_open ? (
 gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
 
 shaped = x * swell_gain * 10 ^ (sus_db / 20) * gate_gain;
+
+// Waveshaper, then a DC blocker for the asymmetric curve's offset.
+smix > 0.0001 ? (
+  ws = shaper(shaped * drive) * scomp;
+  dc_y1 = ws - dc_x1 + dc_r * dc_y1;
+  dc_x1 = ws;
+  shaped += smix * (dc_y1 - shaped);
+);
 
 // Envelope-swept state-variable filter (trapezoidal, stable when modulated).
 env_db = 20 * log10(env + 0.0000001) + sens_db;
