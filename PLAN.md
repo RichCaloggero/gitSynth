@@ -145,7 +145,7 @@ Part 1, processed guitar:
 
 1. Skeleton and filter: input conditioning, the envelope follower, the envelope-controlled resonant filter, dry/wet and output level. Done 2026-10-23.
 2. Envelope reshaping: attack softening or swell, sustain, and the Hold mode. Done 2026-10-23.
-3. Waveshaper.
+3. Waveshaper. Done 2026-10-23.
 4. Square-up and octave-down.
 5. Vowel filter.
 6. Frequency shifter for chorus.
