@@ -49,14 +49,16 @@ The signal passes through these stages in order:
    - Sustain: a compressor that holds the note up as the string decays. The "hold" option lives here.
 4. Waveshaper: soft clipping or wave folding, to add or change harmonics. The amount is low by default, so chords stay clean.
 5. Envelope-controlled resonant filter: a low-pass filter (a state-variable filter) whose cutoff sweeps with picking strength. Its controls are base cutoff, sweep depth and direction, sweep speed, and resonance.
-6. Square-up and octave-down, single notes only: a comparator with hysteresis makes a square wave at the string's frequency. A flip-flop halves it to one octave below, and the result is shaped by the guitar's envelope. It has its own mix level. There is no octave-up stage; Rich finds it too metallic.
-7. Vowel filter: two or three band-pass filters at the formants of a vowel. The envelope moves them between two chosen vowels, for "wah-ow" and talk-box-like sounds. It works on chords.
-8. Dynamic freeze: when a note has settled, capture a short slice and loop it smoothly with crossfades, so the note sustains for ever. A new pick attack, found by an onset detector, releases the frozen sound and captures the new note. A threshold sets how strong an attack must be to count. The onset detector is shared with Part 2.
-9. Resonator bank: tuned comb filters set to fixed notes, chosen as a root note plus a chord or scale. The guitar makes them ring, for a sitar-like or drone shimmer.
-10. Frequency shifter, for chorus only: it shifts every harmonic by the same few Hz, using a Hilbert transform built from all-pass filters, so it adds no latency. Its range is limited to a few Hz, because larger shifts destroy the sound.
-11. Output: dry/wet mix and output level.
+6. Body resonance: a few fixed band-pass peaks shaped like the response of a violin or cello body, so the sound seems to come from a wooden instrument. It works on chords.
+7. Frequency-shifter ensemble: it shifts every harmonic by the same few Hz, using a Hilbert transform built from all-pass filters, so it adds no latency. Two copies shifted in opposite directions spread one guitar into a section-like sound. Its range is limited to a few Hz, because larger shifts destroy the sound.
+8. Vibrato: a short delay line whose delay time wobbles, which bends every note of a chord together. It can start after a delay once the note has swelled in, timed from the swell stage.
+9. Dynamic freeze: when a note or chord has settled, capture a short slice and loop it smoothly with crossfades, so it sustains for ever. A new pick attack, found by an onset detector, releases the frozen sound and captures the new one. A threshold sets how strong an attack must be to count. The onset detector is shared with Part 2.
+10. Vowel filter: two or three band-pass filters at the formants of a vowel. The envelope moves them between two chosen vowels, for "wah-ow" and talk-box-like sounds. It works on chords.
+11. Resonator bank: tuned comb filters set to fixed notes, chosen as a root note plus a chord or scale. The guitar makes them ring, for a sitar-like or drone shimmer.
+12. Square-up and octave-down, optional, single notes only: a comparator with hysteresis makes a square wave at the string's frequency. A flip-flop halves it to one octave below, and the result is shaped by the guitar's envelope. It feeds the filter in parallel with the guitar and has its own mix level. There is no octave-up stage; Rich finds it too metallic.
+13. Output: dry/wet mix and output level.
 
-The order of stages 7 to 10 is provisional and may change once they can be heard.
+Part 1 centres on chord-friendly processing of the swelled, violin-like sound (decided 2026-10-23). The square wave is optional. The order of stages 9 to 11 is provisional and may change once they can be heard.
 
 Later options, if wanted: a phaser, and a second filter.
 
@@ -66,11 +68,13 @@ Later options, if wanted: a phaser, and a second filter.
 - Sustain amount.
 - Drive and shape for the waveshaper.
 - Filter base cutoff, sweep depth, sweep direction, sweep speed and resonance.
-- Square wave level and octave-down level.
-- Vowel filter: start vowel, end vowel, sweep amount and mix.
+- Body resonance: body type (violin, viola or cello), amount.
+- Ensemble: shift amount in Hz (a small range), number of copies and mix.
+- Vibrato: depth, rate, onset delay and fade-in time.
 - Freeze: on or off, attack threshold for release, loop crossfade length, and mix.
+- Vowel filter: start vowel, end vowel, sweep amount and mix.
 - Resonator bank: root note, chord or scale, decay time, brightness and mix.
-- Frequency shift: amount in Hz (a small range) and mix.
+- Square wave level and octave-down level.
 - Envelope mode: Follow guitar, or Hold.
 - Dry/wet mix.
 - Output level.
@@ -146,22 +150,24 @@ Part 1, processed guitar:
 1. Skeleton and filter: input conditioning, the envelope follower, the envelope-controlled resonant filter, dry/wet and output level. Done 2026-10-23.
 2. Envelope reshaping: attack softening or swell, sustain, and the Hold mode. Done 2026-10-23.
 3. Waveshaper. Done 2026-10-23.
-4. Square-up and octave-down.
-5. Vowel filter.
-6. Frequency shifter for chorus.
-7. Resonator bank.
-8. Dynamic freeze, including the onset detector.
+4. Body resonance.
+5. Frequency-shifter ensemble.
+6. Vibrato with delayed onset.
+7. Dynamic freeze, including the onset detector.
+8. Vowel filter.
+9. Resonator bank.
+10. Optional: square-up and octave-down.
 
 Part 2, tracked voice:
 
-9. Coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 8. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
-10. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue.
-11. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed.
-12. Note logic: the octave guard, legato detection and mute detection. Measure.
-13. Voice A with all controls, including the pitch modes, and the Part 1 / Part 2 mix.
-14. Attack masking.
-15. Voice B, the waveguide tube.
-16. Later and optional: a lookahead mode for recorded tracks, a polyphonic filter-bank mode for chords, and a port to Rust as a CLAP plugin.
+11. Coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
+12. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue.
+13. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed.
+14. Note logic: the octave guard, legato detection and mute detection. Measure.
+15. Voice A with all controls, including the pitch modes, and the Part 1 / Part 2 mix.
+16. Attack masking.
+17. Voice B, the waveguide tube.
+18. Later and optional: a lookahead mode for recorded tracks, a polyphonic filter-bank mode for chords, and a port to Rust as a CLAP plugin.
 
 ## Known limitations
 
