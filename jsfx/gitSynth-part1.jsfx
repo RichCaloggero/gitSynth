@@ -1,8 +1,8 @@
-desc:gitSynth Part 1 - processed guitar (step 3: waveshaper)
+desc:gitSynth Part 1 - processed guitar (step 4: body resonance)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
 // Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
 // -> waveshaper -> envelope-swept resonant state-variable filter
-// -> dry/wet -> output level.
+// -> body resonance -> dry/wet -> output level.
 // The filter sweep follows picking strength before reshaping.
 
 slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
@@ -22,6 +22,8 @@ slider14:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
 slider15:drive_db=0<0,36,0.5>Drive (dB)
 slider16:shape=0<0,2,1{Soft clip,Asymmetric,Wave fold}>Shaper type
 slider17:shaper_mix=100<0,100,1>Shaper mix (%)
+slider18:body_type=0<0,2,1{Violin,Viola,Cello}>Body type
+slider19:body_amt=0<0,100,1>Body amount (%)
 
 in_pin:Guitar
 out_pin:Left
@@ -86,6 +88,21 @@ function shaper_peak(v) (
 // Start smoothed values at their targets so nothing sweeps on load.
 first = 1;
 
+// Body resonance: bell filters at the main resonances of a violin body.
+// Viola and cello use the same shape, scaled down in frequency.
+// These are approximate starting values, to be tuned by ear.
+BODY_N = 5;
+bfreq = 0; bgain = 8; bq = 16;            // table: frequency, gain at 100%, Q
+ba1 = 24; ba2 = 32; ba3 = 40; bm1 = 48;   // per-band coefficients
+bic1 = 56; bic2 = 64;                     // per-band filter state
+bfreq[0] = 275;  bgain[0] = 6;  bq[0] = 4;     // air resonance
+bfreq[1] = 460;  bgain[1] = 5;  bq[1] = 5;     // lower main body resonance
+bfreq[2] = 550;  bgain[2] = 6;  bq[2] = 5;     // upper main body resonance
+bfreq[3] = 1500; bgain[3] = -4; bq[3] = 1.5;   // dip below the bridge hill
+bfreq[4] = 2500; bgain[4] = 7;  bq[4] = 1.2;   // bridge hill, gives the bite
+i = 0;
+loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
+
 @slider
 att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
 rel_c = 1 - exp(-1 / (rel_ms * 0.001 * srate));
@@ -103,6 +120,21 @@ t_sus = env_mode ? 1 : sustain / 100;   // Hold is full sustain
 t_drive = 10 ^ (drive_db / 20);
 t_scomp = SHAPER_REF / shaper_peak(t_drive * SHAPER_REF);
 t_smix = drive_db > 0 ? shaper_mix / 100 : 0;
+
+// Body bells (trapezoidal state-variable bell filters).
+body_scale = body_type == 0 ? 1 : body_type == 1 ? 0.83 : 0.42;
+i = 0;
+loop(BODY_N,
+  bA = 10 ^ (bgain[i] * body_amt / 100 / 40);
+  bg = tan($pi * min(nyq_limit, bfreq[i] * body_scale) / srate);
+  bk = 1 / (bq[i] * bA);
+  ba1[i] = 1 / (1 + bg * (bg + bk));
+  ba2[i] = bg * ba1[i];
+  ba3[i] = bg * ba2[i];
+  bm1[i] = bk * (bA * bA - 1);
+  i += 1;
+);
+body_makeup = 10 ^ (-1.5 * body_amt / 100 / 20);  // offsets the boosts
 first ? (
   k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
   wet = t_wet; outg = t_out; sus = t_sus;
@@ -181,6 +213,21 @@ f_ic1 = 2 * v1 - f_ic1;
 f_ic2 = 2 * v2 - f_ic2;
 // Band-pass is unity gain at its peak; low- and high-pass get the compensation.
 y = mode == 1 ? v1 * k : (mode == 0 ? v2 : shaped - k * v1 - v2) * comp;
+
+// Body resonance.
+body_amt > 0 ? (
+  i = 0;
+  loop(BODY_N,
+    v3 = y - bic2[i];
+    v1 = ba1[i] * bic1[i] + ba2[i] * v3;
+    v2 = bic2[i] + ba2[i] * bic1[i] + ba3[i] * v3;
+    bic1[i] = 2 * v1 - bic1[i];
+    bic2[i] = 2 * v2 - bic2[i];
+    y += bm1[i] * v1;
+    i += 1;
+  );
+  y *= body_makeup;
+);
 
 y = (x + wet * (y - x)) * outg;
 spl0 = spl1 = y;
