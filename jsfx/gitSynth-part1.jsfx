@@ -1,0 +1,103 @@
+desc:gitSynth Part 1 - processed guitar (step 1: envelope filter)
+// Mono guitar in on channel 1; the result goes to channels 1 and 2.
+// Stages: input high-pass -> envelope follower -> envelope-swept resonant
+// state-variable filter -> dry/wet -> output level.
+
+slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
+slider2:depth_oct=3<0,6,0.1>Sweep depth (octaves)
+slider3:direction=0<0,1,1{Up,Down}>Sweep direction
+slider4:sens_db=0<-24,24,0.5>Sensitivity (dB)
+slider5:att_ms=3<0.5,50,0.1:log>Sweep attack (ms)
+slider6:rel_ms=250<10,2000,1:log>Sweep release (ms)
+slider7:reso=50<0,100,1>Resonance (%)
+slider8:mode=0<0,2,1{Low-pass,Band-pass,High-pass}>Filter type
+slider9:mix=100<0,100,1>Dry/wet (%)
+slider10:out_db=0<-24,12,0.1>Output level (dB)
+
+in_pin:Guitar
+out_pin:Left
+out_pin:Right
+
+@init
+HP_HZ = 70;          // input high-pass; also removes DC
+FLOOR_DB = -48;      // envelope level that gives no sweep
+RANGE_DB = 48;       // envelope span from no sweep to full sweep
+SMOOTH_MS = 10;      // slider smoothing, avoids zipper noise
+
+smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
+nyq_limit = 0.45 * srate;
+
+// Input high-pass: fixed state-variable filter, Q 0.707.
+hp_g = tan($pi * HP_HZ / srate);
+hp_k = sqrt(2);
+hp_a1 = 1 / (1 + hp_g * (hp_g + hp_k));
+hp_a2 = hp_g * hp_a1;
+hp_a3 = hp_g * hp_a2;
+hp_ic1 = hp_ic2 = 0;
+
+env = 0;
+f_ic1 = f_ic2 = 0;
+
+// Start smoothed values at their targets so nothing sweeps on load.
+first = 1;
+
+@slider
+att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
+rel_c = 1 - exp(-1 / (rel_ms * 0.001 * srate));
+q = 0.5 * pow(40, reso / 100);          // Q from 0.5 to 20
+t_k = 1 / q;
+t_comp = min(1, 1 / sqrt(q / 0.707));   // tame the resonant peak
+t_cut = log(cutoff_hz) / log(2);        // base cutoff in octaves
+t_depth = direction ? -depth_oct : depth_oct;
+t_wet = mix / 100;
+t_out = 10 ^ (out_db / 20);
+first ? (
+  k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
+  wet = t_wet; outg = t_out;
+  first = 0;
+);
+
+@sample
+x = spl0;
+
+// Input high-pass.
+v3 = x - hp_ic2;
+v1 = hp_a1 * hp_ic1 + hp_a2 * v3;
+v2 = hp_ic2 + hp_a2 * hp_ic1 + hp_a3 * v3;
+hp_ic1 = 2 * v1 - hp_ic1;
+hp_ic2 = 2 * v2 - hp_ic2;
+x = x - hp_k * v1 - v2;
+
+// Envelope follower: peak detector with separate attack and release.
+a = abs(x);
+env += (a > env ? att_c : rel_c) * (a - env);
+
+// Smooth the slider values.
+k += smooth * (t_k - k);
+comp += smooth * (t_comp - comp);
+cut += smooth * (t_cut - cut);
+depth += smooth * (t_depth - depth);
+wet += smooth * (t_wet - wet);
+outg += smooth * (t_out - outg);
+
+// Sweep amount 0..1 from the envelope level in dB.
+env_db = 20 * log10(env + 0.0000001) + sens_db;
+amt = max(0, min(1, (env_db - FLOOR_DB) / RANGE_DB));
+fc = 2 ^ (cut + depth * amt);
+fc = max(20, min(nyq_limit, fc));
+
+// Envelope-swept state-variable filter (trapezoidal, stable when modulated).
+g = tan($pi * fc / srate);
+a1 = 1 / (1 + g * (g + k));
+a2 = g * a1;
+a3 = g * a2;
+v3 = x - f_ic2;
+v1 = a1 * f_ic1 + a2 * v3;
+v2 = f_ic2 + a2 * f_ic1 + a3 * v3;
+f_ic1 = 2 * v1 - f_ic1;
+f_ic2 = 2 * v2 - f_ic2;
+// Band-pass is unity gain at its peak; low- and high-pass get the compensation.
+y = mode == 1 ? v1 * k : (mode == 0 ? v2 : x - k * v1 - v2) * comp;
+
+y = (x + wet * (y - x)) * outg;
+spl0 = spl1 = y;
