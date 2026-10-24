@@ -1,0 +1,81 @@
+// gitSynth shared library: stereo delay-line vibrato.
+// Needs cookdsp (delay, memalloc), imported before this file.
+//
+// Object, in cookDSP's style:
+//   gs_vibrato_init()
+//   gs_vibrato_do(l r cents rate shape gain)   sets this.l and this.r
+//     cents: peak pitch swing; rate in Hz;
+//     shape: 0 sine, 1 triangle, 2 random step, 3 random smooth;
+//     gain 0-1 scales the swing (for delayed onset and fade-in).
+//
+// A delay line whose length changes bends the pitch of everything passing
+// through it, so chords stay chords. The pitch follows how fast the delay is
+// changing, not the delay itself, so each shape below is the delay curve
+// whose rate of change has the named shape:
+//   sine           -> a sine (its rate of change is also a sine)
+//   triangle       -> parabolic segments, so the pitch moves in a triangle
+//   random step    -> straight lines between random points, so the pitch
+//                     holds a random value for each cycle, then jumps
+//   random smooth  -> a smooth curve (Catmull-Rom) through random points,
+//                     so the pitch glides between random values
+// The vibrato adds a small delay: about 1 ms at 5.5 Hz and 50 cents.
+
+@init
+
+function gs_vibrato_init()
+  local(size)
+(
+  // Longest delay: centre (1.3 x swing + 4) plus a 1.3 x swing overshoot,
+  // with the swing capped at 30 ms. delay_fread3 does not check bounds.
+  size = ceil(0.08 * srate) + 16;
+  this.dl.delay(size);
+  this.dr.delay(size);
+  this.smooth = 1 - exp(-1 / (0.02 * srate));    // 20 ms, for slider moves
+  this.ph = 0;
+  this.p0 = this.p1 = 0;                 // random points, oldest first
+  this.p2 = 2 * rand(1) - 1;
+  this.p3 = 2 * rand(1) - 1;
+  this.swing = 0;          // smoothed swing in samples
+  this.centre = 4;         // smoothed centre delay in samples
+  this.l = this.r = 0;
+);
+
+// Delay curve, -1 to 1 (Catmull-Rom can overshoot slightly).
+function gs_vibrato_curve(shape)
+  local(u)
+(
+  u = this.ph;
+  shape == 0 ? sin(2 * $pi * u) :
+  shape == 1 ? 8 * (u < 0.5 ? u - 2 * u * u : 2 * u * u - 3 * u + 1) :
+  shape == 2 ? this.p1 + (this.p2 - this.p1) * u :
+  0.5 * (2 * this.p1 + (this.p2 - this.p0) * u
+         + (2 * this.p0 - 5 * this.p1 + 4 * this.p2 - this.p3) * u * u
+         + (3 * this.p1 - this.p0 - 3 * this.p2 + this.p3) * u * u * u);
+);
+
+function gs_vibrato_do(l r cents rate shape gain)
+  local(ratio k target d)
+(
+  this.ph += rate / srate;
+  this.ph >= 1 ? (
+    this.ph -= 1;
+    this.p0 = this.p1; this.p1 = this.p2; this.p2 = this.p3;
+    this.p3 = 2 * rand(1) - 1;
+  );
+  // Swing in samples for a peak pitch change of `cents` at `rate`: the
+  // curve's steepest slope per cycle is 2 pi (sine), 8 (triangle), and up
+  // to about 2 (random), so the random depths are approximate.
+  ratio = 2 ^ (cents / 1200) - 1;
+  k = shape == 0 ? 1 / (2 * $pi) : shape == 1 ? 1 / 8 : 0.5;
+  target = min(0.03 * srate, ratio * srate * k / rate);
+  this.swing += this.smooth * (target - this.swing);
+  // The centre follows the full swing (with room for overshoot), not the
+  // onset gain, so fading the vibrato in and out never moves the centre.
+  this.centre += this.smooth * (1.3 * this.swing + 4 - this.centre);
+
+  d = this.centre + this.swing * gain * this.gs_vibrato_curve(shape);
+  this.l = this.dl.delay_fread3(d);
+  this.r = this.dr.delay_fread3(d);
+  this.dl.delay_write(l);
+  this.dr.delay_write(r);
+);

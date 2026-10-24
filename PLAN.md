@@ -152,7 +152,7 @@ Part 1, processed guitar:
 3. Waveshaper. Done 2026-10-23.
 4. Body resonance. Done 2026-10-23.
 5. Frequency-shifter ensemble. Done 2026-10-23. Then moved into a shared library (`jsfx/gitsynth/freqshift.jsfx-inc`) with an LFO (sine, triangle, random step, random smooth) that wobbles each copy's shift, and also released as a standalone effect, `jsfx/gitSynth-freqshift.jsfx`.
-6. Vibrato with delayed onset.
+6. Vibrato with delayed onset. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
 7. Dynamic freeze, including the onset detector.
 8. Vowel filter.
 9. Resonator bank.

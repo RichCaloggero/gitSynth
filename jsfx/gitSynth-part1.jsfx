@@ -1,9 +1,9 @@
-desc:gitSynth Part 1 - processed guitar (step 5: ensemble)
+desc:gitSynth Part 1 - processed guitar (step 6: vibrato)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
 // Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
 // -> waveshaper -> envelope-swept resonant state-variable filter
 // -> body resonance -> frequency-shifter ensemble (can be stereo)
-// -> dry/wet -> output level.
+// -> vibrato -> dry/wet -> output level.
 // The filter sweep follows picking strength before reshaping.
 
 slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
@@ -32,9 +32,15 @@ slider23:ens_spread=0<0,100,1>Ensemble stereo spread (%)
 slider24:ens_lfo_rate=0.3<0.05,10,0.01:log>Ensemble LFO rate (Hz)
 slider25:ens_lfo_depth=0<0,100,1>Ensemble LFO depth (%)
 slider26:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>Ensemble LFO shape
+slider27:vib_cents=0<0,100,1>Vibrato depth (cents)
+slider28:vib_rate=5.5<0.5,12,0.1:log>Vibrato rate (Hz)
+slider29:vib_shape=0<0,3,1{Sine,Triangle,Random step,Random smooth}>Vibrato shape
+slider30:vib_onset_ms=300<0,2000,10>Vibrato onset delay (ms)
+slider31:vib_fade_ms=500<0,2000,10>Vibrato fade-in (ms)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/freqshift.jsfx-inc
+import gitsynth/vibrato.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -70,6 +76,9 @@ level_att_c = 1 - exp(-1 / (0.001 * srate));     // 1 ms: catches the pick, so n
 level_rel_c = 1 - exp(-1 / (0.2 * srate));       // 200 ms: little ripple on low E
 gate_att_c = 1 - exp(-1 / (0.002 * srate));      // 2 ms
 gate_rel_c = 1 - exp(-1 / (0.15 * srate));       // 150 ms
+onset_c = 1 - exp(-1 / (0.03 * srate));          // 30 ms, slow side of the attack detector
+vib_fall_c = 1 - exp(-1 / (0.1 * srate));        // 100 ms, vibrato fade-out on a new note
+ONSET_RATIO = 2;     // a jump of 6 dB within about 30 ms counts as a new note
 
 env = 0;
 f_ic1 = f_ic2 = 0;
@@ -118,6 +127,12 @@ loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
 
 // Frequency-shifter ensemble, from gitsynth/freqshift.jsfx-inc.
 ens.gs_ensemble_init();
+
+// Vibrato, from gitsynth/vibrato.jsfx-inc, with its delayed onset.
+vib.gs_vibrato_init();
+onset_slow = 0;
+vib_timer = 0;
+vib_gain = 0;
 
 @slider
 att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
@@ -202,6 +217,19 @@ gate_open ? (
 );
 gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
 
+// Attack detector for the vibrato onset: a new note is a sudden rise of the
+// fast envelope above a 30 ms copy of it. The vibrato starts after the onset
+// delay and fades in; a new note fades it out over 100 ms and starts again.
+onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
+(env_fast > ONSET_RATIO * onset_slow + 0.0001 || !gate_open) ? (
+  vib_timer = 0;
+) : (
+  vib_timer += 1 / srate;
+);
+vib_t = vib_timer * 1000 - vib_onset_ms;
+vib_target = vib_t <= 0 ? 0 : vib_fade_ms <= 0 ? 1 : min(1, vib_t / vib_fade_ms);
+vib_gain = vib_target >= vib_gain ? vib_target : vib_gain + vib_fall_c * (vib_target - vib_gain);
+
 shaped = x * swell_gain * 10 ^ (sus_db / 20) * gate_gain;
 
 // Waveshaper, then a DC blocker for the asymmetric curve's offset.
@@ -250,5 +278,12 @@ body_amt > 0 ? (
 ens.gs_ensemble_do(y, ens_hz, ens_copies, ens_mix / 100, ens_spread / 100,
                    ens_lfo_rate, ens_lfo_depth / 100, ens_lfo_shape);
 
-spl0 = (x + wet * (ens.l - x)) * outg;
-spl1 = (x + wet * (ens.r - x)) * outg;
+// Vibrato on both channels together; depth 0 bypasses it.
+yl = ens.l; yr = ens.r;
+vib_cents > 0 ? (
+  vib.gs_vibrato_do(yl, yr, vib_cents, vib_rate, vib_shape, vib_gain);
+  yl = vib.l; yr = vib.r;
+);
+
+spl0 = (x + wet * (yl - x)) * outg;
+spl1 = (x + wet * (yr - x)) * outg;
