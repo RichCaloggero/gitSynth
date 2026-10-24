@@ -14,34 +14,35 @@ slider5:att_ms=3<0.5,50,0.1:log>Sweep attack (ms)
 slider6:rel_ms=250<10,2000,1:log>Sweep release (ms)
 slider7:reso=50<0,100,1>Resonance (%)
 slider8:mode=0<0,2,1{Low-pass,Band-pass,High-pass}>Filter type
-slider9:mix=100<0,100,1>Dry/wet (%)
-slider10:out_db=0<-24,12,0.1>Output level (dB)
-slider11:swell_ms=1<1,2000,1:log>Note attack time (ms)
-slider12:sustain=0<0,100,1>Sustain (%)
-slider13:env_mode=0<0,1,1{Follow guitar,Hold}>Envelope mode
-slider14:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
-slider15:drive_db=0<0,36,0.5>Drive (dB)
-slider16:shape=0<0,2,1{Soft clip,Asymmetric,Wave fold}>Shaper type
-slider17:shaper_mix=100<0,100,1>Shaper mix (%)
-slider18:body_type=0<0,2,1{Violin,Viola,Cello}>Body type
-slider19:body_amt=0<0,100,1>Body amount (%)
-slider20:ens_hz=1<0.05,10,0.05:log>Ensemble shift (Hz)
-slider21:ens_copies=1<0,1,1{One (up),Two (up and down)}>Ensemble copies
-slider22:ens_mix=0<0,100,1>Ensemble mix (%)
-slider23:ens_spread=0<0,100,1>Ensemble stereo spread (%)
-slider24:ens_lfo_rate=0.3<0.05,10,0.01:log>Ensemble LFO rate (Hz)
-slider25:ens_lfo_depth=0<0,100,1>Ensemble LFO depth (%)
-slider26:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>Ensemble LFO shape
-slider27:vib_cents=0<0,100,1>Vibrato depth (cents)
-slider28:vib_rate=5.5<0.5,12,0.1:log>Vibrato rate (Hz)
-slider29:vib_shape=0<0,3,1{Sine,Triangle,Random step,Random smooth}>Vibrato shape
-slider30:vib_onset_ms=300<0,2000,10>Vibrato onset delay (ms)
-slider31:vib_fade_ms=500<0,2000,10>Vibrato fade-in (ms)
-slider36:onset_db=6<3,20,0.5>Attack threshold (dB)
-slider37:vow_start=3<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel start
-slider38:vow_end=0<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel end
-slider39:vow_sweep=100<0,100,1>Vowel sweep (%)
-slider40:vow_mix=0<0,100,1>Vowel mix (%)
+slider10:mix=100<0,100,1>Dry/wet (%)
+slider11:out_db=0<-24,12,0.1>Output level (dB)
+slider13:swell_ms=1<1,2000,1:log>Note attack time (ms)
+slider14:sustain=0<0,100,1>Sustain (%)
+slider15:sus_margin_db=3<0,12,0.5>Sustain level (dB below note start)
+slider16:env_mode=0<0,1,1{Follow guitar,Hold}>Envelope mode
+slider17:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
+slider18:onset_db=6<3,20,0.5>Attack threshold (dB)
+slider20:drive_db=0<0,36,0.5>Drive (dB)
+slider21:shape=0<0,2,1{Soft clip,Asymmetric,Wave fold}>Shaper type
+slider22:shaper_mix=100<0,100,1>Shaper mix (%)
+slider24:body_type=0<0,2,1{Violin,Viola,Cello}>Body type
+slider25:body_amt=0<0,100,1>Body amount (%)
+slider27:ens_hz=1<0.05,10,0.05:log>Ensemble shift (Hz)
+slider28:ens_copies=1<0,1,1{One (up),Two (up and down)}>Ensemble copies
+slider29:ens_mix=0<0,100,1>Ensemble mix (%)
+slider30:ens_spread=0<0,100,1>Ensemble stereo spread (%)
+slider31:ens_lfo_rate=0.3<0.05,10,0.01:log>Ensemble LFO rate (Hz)
+slider32:ens_lfo_depth=0<0,100,1>Ensemble LFO depth (%)
+slider33:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>Ensemble LFO shape
+slider35:vib_cents=0<0,100,1>Vibrato depth (cents)
+slider36:vib_rate=5.5<0.5,12,0.1:log>Vibrato rate (Hz)
+slider37:vib_shape=0<0,3,1{Sine,Triangle,Random step,Random smooth}>Vibrato shape
+slider38:vib_onset_ms=300<0,2000,10>Vibrato onset delay (ms)
+slider39:vib_fade_ms=500<0,2000,10>Vibrato fade-in (ms)
+slider41:vow_start=3<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel start
+slider42:vow_end=0<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel end
+slider43:vow_sweep=100<0,100,1>Vowel sweep (%)
+slider44:vow_mix=0<0,100,1>Vowel mix (%)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/freqshift.jsfx-inc
@@ -58,7 +59,6 @@ HP_HZ = 70;          // input high-pass; also removes DC
 FLOOR_DB = -48;      // envelope level that gives no sweep
 RANGE_DB = 48;       // envelope span from no sweep to full sweep
 SMOOTH_MS = 10;      // slider smoothing, avoids zipper noise
-SUS_MARGIN_DB = 3;   // sustain holds a note this far below its starting level
 NOTE_REF_SAMPLES = floor(0.03 * srate);   // how long after an attack its level is measured
 MAX_GAIN_DB = 30;    // most that sustain will boost a quiet note
 GATE_HYST_DB = 6;    // gate closes this far below its threshold
@@ -234,12 +234,12 @@ onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
 attack = gate_open && env_fast > onset_ratio * onset_slow + 0.0001;
 
 // Sustain lifts a decaying note back towards its own starting level (the
-// loudest point in the first 30 ms after its attack, less SUS_MARGIN_DB). It
+// loudest point in the first 30 ms after its attack, less the sustain level). It
 // never turns a note down, so hard notes stay hard and soft notes soft.
 attack ? (note_ref_db = level_db; note_ref_n = NOTE_REF_SAMPLES;);
 note_ref_n > 0 ? (note_ref_n -= 1; note_ref_db = max(note_ref_db, level_db););
 (level_db > note_ref_db || !gate_open) ? note_ref_db = level_db;   // nothing to lift between notes
-sus_db = min(MAX_GAIN_DB, max(0, sus * (note_ref_db - SUS_MARGIN_DB - level_db)));
+sus_db = min(MAX_GAIN_DB, max(0, sus * (note_ref_db - sus_margin_db - level_db)));
 
 // Vibrato onset: starts after the onset delay and fades in; a new note fades
 // it out over 100 ms and starts again.
