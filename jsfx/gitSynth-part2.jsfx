@@ -16,7 +16,7 @@ desc:gitSynth Part 2 - tracked voice (step 15: Voice A oscillators)
 // A sudden fall in level (a mute) silences the voice until the next pick.
 
 slider1:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
-slider2:max_aper=0.3<0.05,1,0.01>Pitch confidence limit (aperiodicity)
+slider2:max_aper=0.2<0.05,1,0.01>Pitch confidence limit (aperiodicity)
 slider3:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
 slider4:skip_ms=5<0,60,1>Attack skip (ms)
 
