@@ -43,6 +43,7 @@ slider41:vow_start=3<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowe
 slider42:vow_end=0<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel end
 slider43:vow_sweep=100<0,100,1>Vowel sweep (%)
 slider44:vow_mix=0<0,100,1>Vowel mix (%)
+slider45:vow_q=2.5<1,12,0.1:log>Vowel band sharpness (Q, lower is smoother)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/freqshift.jsfx-inc
@@ -297,7 +298,7 @@ body_amt > 0 ? (
 
 // Vowel filter: picking strength (the same sweep amount as the main filter)
 // moves it from the start vowel towards the end vowel.
-y = vow.gs_vowel_do(y, amt * vow_sweep / 100, vow_start, vow_end, vow_mix / 100);
+y = vow.gs_vowel_do(y, amt * vow_sweep / 100, vow_start, vow_end, vow_q, vow_mix / 100);
 
 // Frequency-shifter ensemble: copies of the sound shifted up (and down) by a
 // few Hz, mixed back with it. Two copies can be spread across the stereo field.

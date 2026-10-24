@@ -3,9 +3,10 @@
 //
 // Object, in cookDSP's style:
 //   gs_vowel_init()
-//   gs_vowel_do(x t v_start v_end mix)   returns the output
+//   gs_vowel_do(x t v_start v_end q mix)   returns the output
 //     t 0-1: position between the start vowel and the end vowel;
 //     vowels: 0 A (father), 1 E (bed), 2 I (beet), 3 O (bought), 4 U (boot);
+//     q: sharpness of the formant bands (lower is wider and smoother);
 //     mix 0-1.
 //
 // Three band-pass filters in parallel sit at the first three formants of a
@@ -16,11 +17,14 @@
 
 @init
 
-// The narrow bands pass 3 to 21 dB less than the input, depending on how a
-// note's harmonics fall on the formants. A slow level match (300 ms, up to
-// +24 dB) keeps the output at the input's level, so vowel changes and
-// registers do not jump in volume.
+// Level: narrow bands make each note's level depend on whether its harmonics
+// land on a formant (measured 12-14 dB note to note on high E at Q 9-16).
+// The level match then chased each note, which was heard as the level moving
+// after the pick and jumping in fast playing. At Q 2.5 the spread is about
+// 4-5 dB, so the level match is now slow (1.5 s, up to +24 dB): it sets the
+// overall level without chasing individual notes.
 GS_VOWEL_MAX_GAIN = 16;
+GS_VOWEL_AGC_S = 1.5;
 
 function gs_vowel_init()
   local(f)
@@ -32,30 +36,29 @@ function gs_vowel_init()
   f[6] = 270;  f[7] = 2290; f[8] = 3010;    // I
   f[9] = 570;  f[10] = 840; f[11] = 2410;   // O
   f[12] = 300; f[13] = 870; f[14] = 2240;   // U
-  this.bw = memalloc(3);  this.bw[0] = 80;  this.bw[1] = 100; this.bw[2] = 150;
   this.gain = memalloc(3); this.gain[0] = 1; this.gain[1] = 0.5; this.gain[2] = 0.25;
   this.ic1 = memalloc(3);
   this.ic2 = memalloc(3);
   this.mix = 0;
   this.pin = this.pout = 0;
   this.agc = 1;
-  this.agc_c = 1 - exp(-1 / (0.3 * srate));
+  this.agc_c = 1 - exp(-1 / (GS_VOWEL_AGC_S * srate));
   this.smooth = 1 - exp(-1 / (0.01 * srate));
 );
 
-function gs_vowel_do(x t v_start v_end mix)
-  local(f bw gain ic1 ic2 i fc g k a1 a2 a3 v1 v2 v3 out target)
+function gs_vowel_do(x t v_start v_end q mix)
+  local(f gain ic1 ic2 i fc g k a1 a2 a3 v1 v2 v3 out target)
 (
   this.mix += this.smooth * (mix - this.mix);
   this.mix > 0.0001 ? (
-    f = this.f; bw = this.bw; gain = this.gain; ic1 = this.ic1; ic2 = this.ic2;
+    f = this.f; gain = this.gain; ic1 = this.ic1; ic2 = this.ic2;
+    k = 1 / max(0.5, q);
     out = 0;
     i = 0;
     loop(3,
       fc = f[3 * v_start + i] * (f[3 * v_end + i] / f[3 * v_start + i]) ^ t;
       fc = min(fc, 0.45 * srate);
       g = tan($pi * fc / srate);
-      k = bw[i] / fc;                     // 1 / Q
       a1 = 1 / (1 + g * (g + k));
       a2 = g * a1;
       a3 = g * a2;
