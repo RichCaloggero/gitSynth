@@ -160,7 +160,7 @@ Part 1, processed guitar:
 
 Part 2, tracked voice:
 
-11. Coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
+11. First set up a test rig that runs the real JSFX on the clips: REAPER command-line render first, ysfx if that proves awkward. Until then, Part 1 is checked with Python ports and by ear (decided 2026-10-23). Then the coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
 12. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue.
 13. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed.
 14. Note logic: the octave guard, legato detection and mute detection. Measure.
