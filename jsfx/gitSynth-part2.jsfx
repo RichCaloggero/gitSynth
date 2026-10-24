@@ -1,0 +1,85 @@
+desc:gitSynth Part 2 - tracked voice (step 11: coarse tracker test)
+// Mono guitar in on channel 1. A sine at the tracked pitch, following the
+// guitar's loudness, goes to channels 1 and 2. For testing, channel 3
+// carries the pitch (Hz / 2000, 0 when no pitch) and channel 4 the
+// aperiodicity (0 = clean pitch, 1 = noise).
+
+slider1:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
+slider2:max_aper=0.3<0.05,1,0.01>Pitch confidence limit (aperiodicity)
+slider3:out_db=-6<-24,12,0.1>Output level (dB)
+slider4:mix=100<0,100,1>Dry/wet (%)
+
+import cookdsp/cookdsp.jsfx-inc
+import gitsynth/tracker.jsfx-inc
+
+in_pin:Guitar
+out_pin:Left
+out_pin:Right
+out_pin:Debug pitch
+out_pin:Debug aperiodicity
+
+@init
+__memory_next = 0;   // cookDSP's memalloc starts again on every re-init
+FMIN = 70; FMAX = 1400;
+GATE_HYST_DB = 6;
+
+// Input high-pass at 70 Hz (as Part 1).
+hp_g = tan($pi * 70 / srate); hp_k = sqrt(2);
+hp_a1 = 1 / (1 + hp_g * (hp_g + hp_k)); hp_a2 = hp_g * hp_a1; hp_a3 = hp_g * hp_a2;
+hp_ic1 = hp_ic2 = 0;
+
+level_att_c = 1 - exp(-1 / (0.001 * srate));
+level_rel_c = 1 - exp(-1 / (0.2 * srate));
+amp_att_c = 1 - exp(-1 / (0.005 * srate));
+amp_rel_c = 1 - exp(-1 / (0.1 * srate));
+level = amp = 0;
+gate_open = 0;
+
+trk.gs_tracker_init(FMIN, FMAX);
+voiced = 0;
+pitch = 0;
+osc_phase = 0;
+
+@slider
+outg = 10 ^ (out_db / 20);
+wet = mix / 100;
+
+@sample
+x = spl0;
+v3 = x - hp_ic2;
+v1 = hp_a1 * hp_ic1 + hp_a2 * v3;
+v2 = hp_ic2 + hp_a2 * hp_ic1 + hp_a3 * v3;
+hp_ic1 = 2 * v1 - hp_ic1;
+hp_ic2 = 2 * v2 - hp_ic2;
+x = x - hp_k * v1 - v2;
+
+// Gate, as Part 1: peak level with 6 dB hysteresis.
+a = abs(x);
+level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level_db = 20 * log10(level + 0.0000000001);
+gate_open ? (
+  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
+) : (
+  level_db > gate_db ? gate_open = 1;
+);
+
+// Pitch: accept an estimate only while the gate is open and it is clean.
+trk.gs_tracker_do(x);
+trk.fresh ? (
+  voiced = gate_open && trk.aper < max_aper;
+  voiced ? pitch = trk.hz;
+);
+!gate_open ? voiced = 0;
+
+// Sine at the tracked pitch, with the guitar's loudness.
+amp += (a > amp ? amp_att_c : amp_rel_c) * (a - amp);
+pitch > 0 ? (
+  osc_phase += pitch / srate;
+  osc_phase >= 1 ? osc_phase -= 1;
+);
+voice = sin(2 * $pi * osc_phase) * amp * gate_open;
+
+y = (x + wet * (voice - x)) * outg;
+spl0 = spl1 = y;
+spl2 = voiced ? pitch / 2000 : 0;
+spl3 = trk.aper;

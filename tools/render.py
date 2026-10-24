@@ -55,6 +55,7 @@ def build_rpp(clip, plugin, values, out_wav, channels, length):
         ("%g" % values[i]) if i in values else "-" for i in range(1, 65))
     return f"""<REAPER_PROJECT 0.1 "7.82/win64" 0
   SAMPLERATE 48000 1 0
+  MASTER_NCH {channels} 2
   RENDER_FILE "{out_wav}"
   RENDER_PATTERN ""
   RENDER_FMT 0 {channels} 48000
