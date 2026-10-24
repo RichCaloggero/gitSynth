@@ -29,8 +29,12 @@ slider20:ens_hz=1<0.05,10,0.05:log>Ensemble shift (Hz)
 slider21:ens_copies=1<0,1,1{One (up),Two (up and down)}>Ensemble copies
 slider22:ens_mix=0<0,100,1>Ensemble mix (%)
 slider23:ens_spread=0<0,100,1>Ensemble stereo spread (%)
+slider24:ens_lfo_rate=0.3<0.05,10,0.01:log>Ensemble LFO rate (Hz)
+slider25:ens_lfo_depth=0<0,100,1>Ensemble LFO depth (%)
+slider26:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>Ensemble LFO shape
 
 import cookdsp/cookdsp.jsfx-inc
+import gitsynth/freqshift.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -112,19 +116,8 @@ bfreq[4] = 2500; bgain[4] = 7;  bq[4] = 1.2;   // bridge hill, gives the bite
 i = 0;
 loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
 
-// Ensemble: two all-pass chains whose outputs differ by 90 degrees across
-// the audio band (Olli Niemitalo's design); they give a frequency shifter.
-// Chain A is sections 0-3, chain B is sections 4-7.
-hc = memalloc(8); hx1 = memalloc(8); hx2 = memalloc(8);
-hy1 = memalloc(8); hy2 = memalloc(8);
-hc[0] = 0.6923878;       hc[1] = 0.9360654322959;
-hc[2] = 0.9882295226860; hc[3] = 0.9987488452737;
-hc[4] = 0.4021921162426; hc[5] = 0.8561710882420;
-hc[6] = 0.9722909545651; hc[7] = 0.9952884791278;
-i = 0;
-loop(8, hc[i] *= hc[i]; hx1[i] = hx2[i] = hy1[i] = hy2[i] = 0; i += 1;);
-h_delay = 0;     // chain A's output is delayed by one sample
-ens_phase = 0;
+// Frequency-shifter ensemble, from gitsynth/freqshift.jsfx-inc.
+ens.gs_ensemble_init();
 
 @slider
 att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
@@ -158,14 +151,10 @@ loop(BODY_N,
   i += 1;
 );
 body_makeup = 10 ^ (-1.5 * body_amt / 100 / 20);  // offsets the boosts
-ens_inc = 2 * $pi * ens_hz / srate;
-t_emix = ens_mix / 100;
-t_espread = ens_copies ? ens_spread / 100 : 0;    // spread needs two copies
 first ? (
   k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
   wet = t_wet; outg = t_out; sus = t_sus;
   drive = t_drive; smix = t_smix; scomp = t_scomp;
-  emix = t_emix; espread = t_espread;
   first = 0;
 );
 
@@ -195,8 +184,6 @@ sus += smooth * (t_sus - sus);
 drive += smooth * (t_drive - drive);
 smix += smooth * (t_smix - smix);
 scomp += smooth * (t_scomp - scomp);
-emix += smooth * (t_emix - emix);
-espread += smooth * (t_espread - espread);
 
 // Swell: a slow copy of a fast envelope rises at the note attack time but
 // falls with it at once, so their ratio fades each new attack in.
@@ -260,39 +247,8 @@ body_amt > 0 ? (
 
 // Frequency-shifter ensemble: copies of the sound shifted up (and down) by a
 // few Hz, mixed back with it. Two copies can be spread across the stereo field.
-yl = yr = y;
-emix > 0.0001 ? (
-  ha = y;
-  i = 0;
-  loop(4,
-    o = hc[i] * (ha + hy2[i]) - hx2[i];
-    hx2[i] = hx1[i]; hx1[i] = ha; hy2[i] = hy1[i]; hy1[i] = o;
-    ha = o;
-    i += 1;
-  );
-  hb = y;
-  loop(4,
-    o = hc[i] * (hb + hy2[i]) - hx2[i];
-    hx2[i] = hx1[i]; hx1[i] = hb; hy2[i] = hy1[i]; hy1[i] = o;
-    hb = o;
-    i += 1;
-  );
-  hi = h_delay; h_delay = ha;    // in-phase part
-  hq = hb;                       // 90 degrees behind
-  c = cos(ens_phase); s = sin(ens_phase);
-  ens_phase += ens_inc;
-  ens_phase > 2 * $pi ? ens_phase -= 2 * $pi;
-  up = hi * c + hq * s;
-  ens_copies ? (
-    down = hi * c - hq * s;
-    // Spread 0: both copies in both channels; 100: up left, down right.
-    pl = 0.5 + 0.5 * espread; pr = 0.5 - 0.5 * espread;
-    yl = y + emix * ((up * pl + down * pr) - y);
-    yr = y + emix * ((down * pl + up * pr) - y);
-  ) : (
-    yl = yr = y + emix * (up - y);
-  );
-);
+ens.gs_ensemble_do(y, ens_hz, ens_copies, ens_mix / 100, ens_spread / 100,
+                   ens_lfo_rate, ens_lfo_depth / 100, ens_lfo_shape);
 
-spl0 = (x + wet * (yl - x)) * outg;
-spl1 = (x + wet * (yr - x)) * outg;
+spl0 = (x + wet * (ens.l - x)) * outg;
+spl1 = (x + wet * (ens.r - x)) * outg;

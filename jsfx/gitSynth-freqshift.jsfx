@@ -1,0 +1,40 @@
+desc:gitSynth Frequency Shifter Ensemble
+// Standalone version of gitSynth Part 1's ensemble stage. The same code,
+// from gitsynth/freqshift.jsfx-inc. Mono or stereo in: the channels are
+// mixed to mono for the shifted copies; the dry signal keeps its stereo.
+
+slider1:ens_hz=1<0.05,10,0.05:log>Shift (Hz)
+slider2:ens_copies=1<0,1,1{One (up),Two (up and down)}>Copies
+slider3:ens_mix=50<0,100,1>Mix (%)
+slider4:ens_spread=0<0,100,1>Stereo spread (%)
+slider5:ens_lfo_rate=0.3<0.05,10,0.01:log>LFO rate (Hz)
+slider6:ens_lfo_depth=0<0,100,1>LFO depth (%)
+slider7:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>LFO shape
+slider8:out_db=0<-24,12,0.1>Output level (dB)
+
+import cookdsp/cookdsp.jsfx-inc
+import gitsynth/freqshift.jsfx-inc
+
+in_pin:Left
+in_pin:Right
+out_pin:Left
+out_pin:Right
+
+@init
+__memory_next = 0;   // cookDSP's memalloc starts again on every re-init
+ens.gs_ensemble_init();
+SMOOTH_MS = 10;
+smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
+outg = 10 ^ (out_db / 20);
+
+@slider
+t_out = 10 ^ (out_db / 20);
+
+@sample
+outg += smooth * (t_out - outg);
+m = 0.5 * (spl0 + spl1);
+ens.gs_ensemble_do(m, ens_hz, ens_copies, ens_mix / 100, ens_spread / 100,
+                   ens_lfo_rate, ens_lfo_depth / 100, ens_lfo_shape);
+// Keep the dry stereo image: replace only the mono part with the ensemble.
+spl0 = (spl0 + ens.l - m) * outg;
+spl1 = (spl1 + ens.r - m) * outg;

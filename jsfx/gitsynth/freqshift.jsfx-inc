@@ -1,0 +1,132 @@
+// gitSynth shared library: frequency-shifter ensemble with LFO.
+// Used by gitSynth-part1.jsfx and gitSynth-freqshift.jsfx.
+// Needs cookdsp (for memalloc), imported before this file.
+//
+// Objects, in cookDSP's style (call as name.function()):
+//   gs_hilbert_init() / gs_hilbert_do(x)   sets this.i and this.q, 90 degrees apart
+//   gs_shift_init() / gs_shift_do(i q hz)  returns i, q shifted by hz (negative = down)
+//   gs_lfo_init(phase) / gs_lfo_do(rate shape)
+//       returns -1..1; shape 0 sine, 1 triangle, 2 random step, 3 random smooth
+//   gs_ensemble_init() / gs_ensemble_do(x hz copies mix spread lfo_rate lfo_depth lfo_shape)
+//       sets this.l and this.r
+
+@init
+
+// Hilbert pair: two all-pass chains of four sections whose outputs differ by
+// 90 degrees across the audio band (Olli Niemitalo's design). Chain A's output
+// is delayed by one sample. Images measured 47-63 dB down, 41 Hz to 5 kHz.
+function gs_hilbert_init()
+  local(c i)
+(
+  this.c = memalloc(8);
+  this.x1 = memalloc(8); this.x2 = memalloc(8);
+  this.y1 = memalloc(8); this.y2 = memalloc(8);
+  c = this.c;
+  c[0] = 0.6923878;       c[1] = 0.9360654322959;
+  c[2] = 0.9882295226860; c[3] = 0.9987488452737;
+  c[4] = 0.4021921162426; c[5] = 0.8561710882420;
+  c[6] = 0.9722909545651; c[7] = 0.9952884791278;
+  i = 0;
+  loop(8, c[i] *= c[i]; i += 1;);
+  this.delay = this.i = this.q = 0;
+);
+
+function gs_hilbert_do(x)
+  local(c x1 x2 y1 y2 a b o i)
+(
+  c = this.c; x1 = this.x1; x2 = this.x2; y1 = this.y1; y2 = this.y2;
+  a = b = x;
+  i = 0;
+  loop(4,
+    o = c[i] * (a + y2[i]) - x2[i];
+    x2[i] = x1[i]; x1[i] = a; y2[i] = y1[i]; y1[i] = o;
+    a = o;
+    i += 1;
+  );
+  loop(4,
+    o = c[i] * (b + y2[i]) - x2[i];
+    x2[i] = x1[i]; x1[i] = b; y2[i] = y1[i]; y1[i] = o;
+    b = o;
+    i += 1;
+  );
+  this.i = this.delay; this.delay = a;   // in-phase part
+  this.q = b;                            // 90 degrees behind
+);
+
+// One shifted copy: its own phase, so each copy can move independently.
+function gs_shift_init()
+(
+  this.phase = 0;
+);
+
+function gs_shift_do(i q hz)
+  local(out)
+(
+  out = i * cos(this.phase) + q * sin(this.phase);
+  this.phase += 2 * $pi * hz / srate;
+  this.phase > 2 * $pi ? this.phase -= 2 * $pi;
+  this.phase < 0 ? this.phase += 2 * $pi;
+  out;
+);
+
+// LFO, -1 to 1. Random step jumps to a new random value each cycle and holds
+// it; random smooth glides in a straight line from one random point to the
+// next, arriving just as the next point is chosen.
+function gs_lfo_init(phase)
+(
+  this.ph = phase;
+  this.from = 0;
+  this.to = 2 * rand(1) - 1;
+);
+
+function gs_lfo_do(rate shape)
+(
+  this.ph += rate / srate;
+  this.ph >= 1 ? (
+    this.ph -= 1;
+    this.from = this.to;
+    this.to = 2 * rand(1) - 1;
+  );
+  shape == 0 ? sin(2 * $pi * this.ph) :
+  shape == 1 ? 4 * abs(this.ph - 0.5) - 1 :
+  shape == 2 ? this.to :
+  this.from + (this.to - this.from) * this.ph;
+);
+
+// Ensemble: one copy shifted up, or two shifted up and down, mixed with the
+// input. Each copy's shift wobbles around hz by up to lfo_depth (0-1) of it,
+// from its own LFO, so random shapes drift independently. Spread (0-1, two
+// copies only) pans the up copy left and the down copy right.
+function gs_ensemble_init()
+(
+  this.hil.gs_hilbert_init();
+  this.sup.gs_shift_init();
+  this.sdown.gs_shift_init();
+  this.lup.gs_lfo_init(0);
+  this.ldown.gs_lfo_init(0.25);          // a quarter cycle apart
+  this.smooth = 1 - exp(-1 / (0.01 * srate));
+  this.mix = this.spread = 0;
+  this.l = this.r = 0;
+);
+
+function gs_ensemble_do(x hz copies mix spread lfo_rate lfo_depth lfo_shape)
+  local(up down pl pr)
+(
+  this.mix += this.smooth * (mix - this.mix);
+  this.spread += this.smooth * ((copies ? spread : 0) - this.spread);
+  this.l = this.r = x;
+  this.mix > 0.0001 ? (
+    this.hil.gs_hilbert_do(x);
+    up = this.sup.gs_shift_do(this.hil.i, this.hil.q,
+           hz * (1 + lfo_depth * this.lup.gs_lfo_do(lfo_rate, lfo_shape)));
+    copies ? (
+      down = this.sdown.gs_shift_do(this.hil.i, this.hil.q,
+               -hz * (1 + lfo_depth * this.ldown.gs_lfo_do(lfo_rate, lfo_shape)));
+      pl = 0.5 + 0.5 * this.spread; pr = 0.5 - 0.5 * this.spread;
+      this.l = x + this.mix * ((up * pl + down * pr) - x);
+      this.r = x + this.mix * ((down * pl + up * pr) - x);
+    ) : (
+      this.l = this.r = x + this.mix * (up - x);
+    );
+  );
+);
