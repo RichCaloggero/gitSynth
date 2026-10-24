@@ -150,7 +150,7 @@ Part 1, processed guitar:
 1. Skeleton and filter: input conditioning, the envelope follower, the envelope-controlled resonant filter, dry/wet and output level. Done 2026-10-23.
 2. Envelope reshaping: attack softening or swell, sustain, and the Hold mode. Done 2026-10-23.
 3. Waveshaper. Done 2026-10-23.
-4. Body resonance.
+4. Body resonance. Done 2026-10-23.
 5. Frequency-shifter ensemble.
 6. Vibrato with delayed onset.
 7. Dynamic freeze, including the onset detector.
