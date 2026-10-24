@@ -25,6 +25,7 @@ GS_TRK_RATE = 12000;    // target analysis rate
 GS_TRK_HOP = 16;        // decimated samples between estimates
 GS_TRK_THRESH = 0.15;   // YIN absolute threshold
 GS_TRK_BUF = 2048;      // decimated ring buffer (power of two)
+GS_TRK_HCHECK_HZ = 400; // harmonic check only for estimates below this
 
 function gs_trk_lp_init(fc q)
   local(g)
@@ -121,10 +122,14 @@ function gs_tracker_estimate()
   // times the chosen period has a clearly deeper dip, that is the period.
   // Only when the chosen dip is a poor fit: a near-perfect fit is kept, or a
   // sympathetically ringing lower string pulls the estimate an octave down.
+  // Only below GS_TRK_HCHECK_HZ: strong upper harmonics fool YIN on the low
+  // strings, while on high notes (B and high E) the check itself caused
+  // octave-down errors.
   m = 2;
   loop(2,
     cand = gs_trk_local_min(d, floor(m * best + 0.5), this.tmax);
-    m * best <= this.tmax && bestv > 0.05 && d[cand] < 0.6 * bestv ? (
+    m * best <= this.tmax && bestv > 0.05 && this.fsd / best < GS_TRK_HCHECK_HZ &&
+      d[cand] < 0.6 * bestv ? (
       best = cand; bestv = d[cand];
     );
     m += 1;
