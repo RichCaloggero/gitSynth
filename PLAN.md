@@ -154,7 +154,7 @@ Part 1, processed guitar:
 6. Vibrato with delayed onset. Done 2026-10-23. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
 7. Dynamic freeze: dropped 2026-10-23 (see stage 9 above). The attack threshold slider it added stays, for the vibrato onset.
 8. Vowel filter. Done 2026-10-23. Shared library `jsfx/gitsynth/vowel.jsfx-inc`: three formant band-passes, moved by the main sweep amount, with a slow level match.
-9. Resonator bank.
+9. Resonator bank: deferred 2026-10-24 at Rich's request; revisit if needed later.
 10. Optional: square-up and octave-down.
 
 Part 2, tracked voice:
