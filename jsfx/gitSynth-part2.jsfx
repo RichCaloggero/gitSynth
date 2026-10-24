@@ -18,6 +18,7 @@ slider2:max_aper=0.3<0.05,1,0.01>Pitch confidence limit (aperiodicity)
 slider3:out_db=-6<-24,12,0.1>Output level (dB)
 slider4:mix=100<0,100,1>Dry/wet (%)
 slider5:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
+slider6:skip_ms=5<0,60,1>Attack skip (ms)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/tracker.jsfx-inc
@@ -56,6 +57,10 @@ env_fast = onset_slow = 0;
 need_seed = 1;
 disagree = 0;
 pll_used = 0;
+CONFIRM = 4;         // coarse estimates a new pitch must repeat for (about 5 ms)
+since_attack = 0; confirm_n = 0; cand_hz = 0; prev_attack = 0;
+voice_gain = 0;
+voice_c = 1 - exp(-1 / (0.003 * srate));
 DISAGREE_CENTS = 150;
 DISAGREE_N = 40;     // coarse estimates, about 50 ms
 pitch = 0;
@@ -84,35 +89,56 @@ gate_open ? (
   level_db > gate_db ? gate_open = 1;
 );
 
-// Attack detector: a new note needs a fresh seed for the fine tracker.
+// Attack detector. At each new attack the voice is muted and the pitch is
+// found afresh: estimates from the first skip_ms (pick noise) are ignored,
+// then a pitch must repeat within 50 cents for CONFIRM estimates (about
+// 5 ms) before it is used. That pitch seeds the fine tracker and unmutes the
+// voice; from then on the voice holds the last good pitch until the next
+// attack or the gate closes.
 env_fast += (a > env_fast ? fast_att_c : fast_rel_c) * (a - env_fast);
 onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
-((gate_open && env_fast > 2 * onset_slow + 0.0001) || !gate_open) ? need_seed = 1;
+attack = gate_open && env_fast > 2 * onset_slow + 0.0001;
+// Restart only where an attack begins (it stays detected through the rise
+// of the pick, which would otherwise keep restarting the skip).
+((attack && !prev_attack) || !gate_open) ? (
+  need_seed = 1; since_attack = 0; confirm_n = 0; pll_used = 0; voiced = 0;
+) : since_attack += 1;
+prev_attack = attack;
 
-// Coarse pitch: accept an estimate only while the gate is open and it is clean.
+// Coarse pitch.
 trk.gs_tracker_do(x);
 reseed = 0;
 trk.fresh ? (
-  coarse_ok = gate_open && trk.aper < max_aper;
+  coarse_ok = gate_open && trk.aper < max_aper && since_attack >= skip_ms * 0.001 * srate;
   coarse_ok ? (
     need_seed ? (
-      reseed = 1; need_seed = 0; disagree = 0;
-    ) : pll.hz > 0 && abs(1200 * log(trk.hz / pll.hz) / log(2)) > DISAGREE_CENTS ? (
-      disagree += 1;
-      disagree >= DISAGREE_N ? (reseed = 1; disagree = 0;);
-    ) : disagree = 0;
+      confirm_n > 0 && abs(1200 * log(trk.hz / cand_hz) / log(2)) < 50 ? (
+        confirm_n += 1;
+        cand_hz += 0.3 * (trk.hz - cand_hz);
+      ) : (
+        cand_hz = trk.hz;
+        confirm_n = 1;
+      );
+      confirm_n >= CONFIRM ? (
+        reseed = 1; need_seed = 0; disagree = 0;
+        pitch = cand_hz; voiced = 1;
+      );
+    ) : (
+      // Note established: follow the coarse pitch (coarse-only mode), and
+      // restart the fine tracker if the two disagree for about 50 ms.
+      !tracker ? pitch = trk.hz;
+      pll.hz > 0 && abs(1200 * log(trk.hz / pll.hz) / log(2)) > DISAGREE_CENTS ? (
+        disagree += 1;
+        disagree >= DISAGREE_N ? (reseed = 1; disagree = 0;);
+      ) : disagree = 0;
+    );
   );
-  !tracker ? (voiced = coarse_ok; voiced ? pitch = trk.hz;);
 );
-pll.gs_pll_do(x, trk.hz, tracker && reseed);
-pll.locked ? pll_used = 1;
-!pll.alive ? pll_used = 0;
-tracker ? (
-  pll_used ? (
-    voiced = 1; pitch = pll.hz;
-  ) : trk.fresh ? (
-    voiced = coarse_ok; voiced ? pitch = trk.hz;
-  );
+pll.gs_pll_do(x, reseed ? cand_hz : trk.hz, tracker && reseed);
+tracker && voiced ? (
+  pll.locked ? pll_used = 1;
+  !pll.alive ? pll_used = 0;
+  pll_used ? pitch = pll.hz : (trk.fresh && coarse_ok ? pitch = trk.hz);
 );
 !gate_open ? voiced = 0;
 
@@ -122,7 +148,8 @@ pitch > 0 ? (
   osc_phase += pitch / srate;
   osc_phase >= 1 ? osc_phase -= 1;
 );
-voice = sin(2 * $pi * osc_phase) * amp * gate_open;
+voice_gain += voice_c * (voiced - voice_gain);    // 3 ms fade in and out
+voice = sin(2 * $pi * osc_phase) * amp * gate_open * voice_gain;
 
 y = (x + wet * (voice - x)) * outg;
 spl0 = spl1 = y;

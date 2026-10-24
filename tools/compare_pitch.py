@@ -4,7 +4,7 @@ The render's channel 3 holds the tracked pitch (Hz / 2000, 0 = no pitch),
 as written by gitSynth-part2.jsfx. The reference is results/reference/CLIP.csv
 from tools/reference_pitch.py. For each reference note (a voiced run of at
 least 0.25 s, louder than -45 dB) it reports:
-  lock    time from the note's start until the tracker is within 50 cents
+  lock    time from the pick until the tracker is within 50 cents
           of the note and stays there for 50 ms
   error   median and 95th-percentile absolute error in cents, measured from
           150 ms into the note to its end
@@ -54,12 +54,36 @@ def notes(t, voiced, yin, level):
     return out
 
 
+def pick_times(name, starts):
+    """Actual pick time near each reference note start.
+
+    pYIN analyses 128 ms windows centred on each frame, so it marks a note as
+    starting about 50 ms before the pick. The pick is taken as the steepest
+    10 ms rise in the clip's 5 ms level within 150 ms of the reference start.
+    """
+    x, sr = sf.read(os.path.join(ROOT, "clips", name + ".wav"))
+    k = int(0.005 * sr)
+    e = 10 * np.log10(np.convolve(x ** 2, np.ones(k) / k, "same") + 1e-12)
+    d = int(0.01 * sr)
+    out = []
+    for ts in starts:
+        a = max(k, int((ts - 0.15) * sr))
+        b = min(len(e), int((ts + 0.15) * sr))
+        rise = e[a + d:b] - e[a:b - d]
+        out.append((a + d + int(np.argmax(rise))) / sr if len(rise) else ts)
+    return out
+
+
 def compare(render, name):
     y, sr = sf.read(render)
     track = y[:, 2] * 2000
     t, voiced, yin, level = load_reference(name)
     results = []
-    for ts, te, hz in notes(t, voiced, yin, level):
+    ns = notes(t, voiced, yin, level)
+    picks = pick_times(name, [n[0] for n in ns])
+    for (_, te, hz), ts in zip(ns, picks):
+        if te - ts < 0.1:
+            continue
         i0, i1 = int(ts * sr), int(te * sr)
         seg = track[i0:i1]
         cents = np.where(seg > 0, 1200 * np.log2(np.maximum(seg, 1e-6) / hz), np.nan)
