@@ -30,11 +30,14 @@ slider21:ens_copies=1<0,1,1{One (up),Two (up and down)}>Ensemble copies
 slider22:ens_mix=0<0,100,1>Ensemble mix (%)
 slider23:ens_spread=0<0,100,1>Ensemble stereo spread (%)
 
+import cookdsp/cookdsp.jsfx-inc
+
 in_pin:Guitar
 out_pin:Left
 out_pin:Right
 
 @init
+__memory_next = 0;   // cookDSP's memalloc starts again on every re-init
 HP_HZ = 70;          // input high-pass; also removes DC
 FLOOR_DB = -48;      // envelope level that gives no sweep
 RANGE_DB = 48;       // envelope span from no sweep to full sweep
@@ -97,9 +100,10 @@ first = 1;
 // Viola and cello use the same shape, scaled down in frequency.
 // These are approximate starting values, to be tuned by ear.
 BODY_N = 5;
-bfreq = 0; bgain = 8; bq = 16;            // table: frequency, gain at 100%, Q
-ba1 = 24; ba2 = 32; ba3 = 40; bm1 = 48;   // per-band coefficients
-bic1 = 56; bic2 = 64;                     // per-band filter state
+bfreq = memalloc(BODY_N); bgain = memalloc(BODY_N); bq = memalloc(BODY_N);
+ba1 = memalloc(BODY_N); ba2 = memalloc(BODY_N); ba3 = memalloc(BODY_N);
+bm1 = memalloc(BODY_N);                   // per-band coefficients
+bic1 = memalloc(BODY_N); bic2 = memalloc(BODY_N);   // per-band filter state
 bfreq[0] = 275;  bgain[0] = 6;  bq[0] = 4;     // air resonance
 bfreq[1] = 460;  bgain[1] = 5;  bq[1] = 5;     // lower main body resonance
 bfreq[2] = 550;  bgain[2] = 6;  bq[2] = 5;     // upper main body resonance
@@ -111,7 +115,8 @@ loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
 // Ensemble: two all-pass chains whose outputs differ by 90 degrees across
 // the audio band (Olli Niemitalo's design); they give a frequency shifter.
 // Chain A is sections 0-3, chain B is sections 4-7.
-hc = 80; hx1 = 88; hx2 = 96; hy1 = 104; hy2 = 112;
+hc = memalloc(8); hx1 = memalloc(8); hx2 = memalloc(8);
+hy1 = memalloc(8); hy2 = memalloc(8);
 hc[0] = 0.6923878;       hc[1] = 0.9360654322959;
 hc[2] = 0.9882295226860; hc[3] = 0.9987488452737;
 hc[4] = 0.4021921162426; hc[5] = 0.8561710882420;
