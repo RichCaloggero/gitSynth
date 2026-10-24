@@ -1,0 +1,79 @@
+// gitSynth shared library: waveguide flute (physical model).
+// Needs cookdsp (memalloc), imported before this file.
+//
+// Object, in cookDSP's style:
+//   gs_flute_init()
+//   gs_flute_do(hz pressure noise)   returns one sample (DC removed)
+//     pressure: breath pressure; the tone starts above about 0.8 and is
+//       strong and in tune from 0.9 to 1.2;
+//     noise: breath noise, as a share of the pressure (0.01-0.3).
+//
+// Julius Smith's flute, as in Romain Michon's Faust-STK port (flute.dsp):
+// the breath flow, plus 0.4 of the bore's output, travels along the
+// embouchure delay (half a period), passes a cubic jet curve (x - x^3), is
+// added to 0.4 of the bore's output, low-passed at 2 kHz (losses), and fed
+// into the bore delay (one period). It oscillates at the bore's period.
+//
+// Tuning: measured at 48 kHz, the loop runs about 1 sample longer than its
+// delays (the low-pass and the feedback step), so the bore delay is the
+// period minus 3 samples; within about 8 cents from 110 Hz to 1320 Hz and
+// across pressures 0.85-1.2. An earlier STK-style model only resonated its
+// breath noise (it never truly oscillated), which is what was heard.
+
+@init
+
+GS_FLUTE_BUF = 4096;        // longest delay: about 85 ms at 48 kHz
+GS_FLUTE_BORE_EXTRA = 3;    // samples taken off the bore delay (2 + measured 1)
+GS_FLUTE_EMB_EXTRA = 2;
+GS_FLUTE_FB = 0.4;          // both feedback gains
+
+function gs_flute_init()
+  local(w)
+(
+  this.bore = memalloc(GS_FLUTE_BUF);
+  this.emb = memalloc(GS_FLUTE_BUF);
+  this.bw = this.ew = 0;
+  w = tan($pi * 2000 / srate);                 // 2 kHz first-order low-pass
+  this.b0 = w / (1 + w);
+  this.a1 = (w - 1) / (1 + w);
+  this.lpx = this.lpy = 0;
+  this.s = 0;                                  // bore output, used next sample
+  this.dcx = this.dcy = 0;
+);
+
+// Linear-interpolated read, d samples behind the newest written sample.
+function gs_flute_read(buf newest d)
+  local(p i f)
+(
+  p = newest - d;
+  i = floor(p);
+  f = p - i;
+  buf[i & (GS_FLUTE_BUF - 1)] * (1 - f) + buf[(i + 1) & (GS_FLUTE_BUF - 1)] * f;
+);
+
+function gs_flute_do(hz pressure noise)
+  local(period db de flow a e v y bore emb)
+(
+  bore = this.bore; emb = this.emb;
+  period = srate / max(20, hz);
+  db = min(GS_FLUTE_BUF - 4, max(2, period - GS_FLUTE_BORE_EXTRA));
+  de = max(1, period * 0.5 - GS_FLUTE_EMB_EXTRA);
+
+  flow = pressure * 1.1;
+  flow += flow * noise * (rand(2) - 1) * 1.732;     // uniform noise, unit variance
+  a = flow + GS_FLUTE_FB * this.s;
+  emb[this.ew & (GS_FLUTE_BUF - 1)] = a;
+  e = gs_flute_read(emb, this.ew, de);
+  this.ew += 1;
+  v = e - e * e * e + GS_FLUTE_FB * this.s;          // jet curve, plus bore feedback
+  y = this.b0 * v + this.b0 * this.lpx - this.a1 * this.lpy;
+  this.lpx = v; this.lpy = y;
+  bore[this.bw & (GS_FLUTE_BUF - 1)] = y;
+  this.s = gs_flute_read(bore, this.bw, db);
+  this.bw += 1;
+
+  // Remove the breath's DC offset from the output.
+  this.dcy = y - this.dcx + 0.995 * this.dcy;
+  this.dcx = y;
+  this.dcy;
+);

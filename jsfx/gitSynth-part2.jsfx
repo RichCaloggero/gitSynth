@@ -1,4 +1,4 @@
-desc:gitSynth Part 2 - tracked voice (step 15: Voice A oscillators)
+desc:gitSynth Part 2 - tracked voice (Voice A oscillators, Voice B flute)
 // Mono guitar in on channel 1. An oscillator at the tracked pitch, following
 // the guitar's loudness, goes to channels 1 and 2. For testing, channel 3
 // carries the pitch (Hz / 2000, 0 when no pitch) and channel 4 the
@@ -20,7 +20,7 @@ slider2:max_aper=0.2<0.05,1,0.01>Pitch confidence limit (aperiodicity)
 slider3:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
 slider4:skip_ms=5<0,60,1>Attack skip (ms)
 
-slider6:wave=2<0,4,1{Sine,Triangle,Saw,Square,Pulse}>Waveform
+slider6:wave=2<0,5,1{Sine,Triangle,Saw,Square,Pulse,Flute (physical model)}>Voice
 slider7:bright=50<0,100,1>Brightness (%)
 slider8:pitch_mode=0<0,1,1{Follow playing,Snap to semitones}>Pitch mode
 slider9:snap_pct=100<0,100,1>Snap strength (%)
@@ -30,8 +30,13 @@ slider11:transpose=0<-24,24,1>Transpose (semitones)
 slider13:mix=100<0,100,1>Dry/wet (%)
 slider14:out_db=-6<-24,12,0.1>Output level (dB)
 
+slider16:fl_pressure=100<70,130,1>Flute breath pressure (%)
+slider17:fl_noise=5<0,30,1>Flute breath noise (%)
+slider19:fl_attack_ms=30<5,300,1:log>Flute breath attack (ms)
+
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/tracker.jsfx-inc
+import gitsynth/flute.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -83,6 +88,10 @@ voice_c = 1 - exp(-1 / (0.003 * srate));
 pitch = 0;
 osc_phase = 0;
 osc.blosc(110, 0.5, 0);
+fl.gs_flute_init();
+fl_pr = 0;
+fl_rel_c = 1 - exp(-1 / (0.02 * srate));   // breath stops in about 20 ms
+FLUTE_GAIN = 1;
 voice_m = 0;         // sounding pitch, in MIDI note units (69 = A4)
 
 @slider
@@ -93,6 +102,7 @@ wet = mix / 100;
 osc.blosc_set_type(wave == 1 ? 3 : wave == 2 ? 0 : wave == 3 ? 2 : 4);
 osc.blosc_set_sharp(bright / 100);
 glide_c = glide_ms > 0 ? 1 - exp(-1 / (glide_ms * 0.001 * srate)) : 1;
+fl_att_c = 1 - exp(-1 / (fl_attack_ms * 0.001 * srate));
 
 @sample
 x = spl0;
@@ -204,10 +214,18 @@ pitch > 0 ? (
     osc_phase += vhz / srate;
     osc_phase >= 1 ? osc_phase -= 1;
     o = sin(2 * $pi * osc_phase);
-  ) : (
+  ) : wave <= 4 ? (
     osc.blosc_set_freq(vhz);
     o = osc.blosc_do();
   );
+);
+// Flute: the breath pressure ramps up at each note over the breath attack
+// and stops quickly when the note ends; the guitar's loudness sets the
+// flute's loudness. The tone starts above about 80% pressure.
+wave == 5 ? (
+  fl_target = voiced ? fl_pressure / 100 : 0;
+  fl_pr += (fl_target > fl_pr ? fl_att_c : fl_rel_c) * (fl_target - fl_pr);
+  o = FLUTE_GAIN * fl.gs_flute_do(vhz > 0 ? vhz : 220, fl_pr, fl_noise / 100);
 );
 voice_gain += voice_c * (voiced - voice_gain);    // 3 ms fade in and out
 voice = o * amp * gate_open * voice_gain;
