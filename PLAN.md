@@ -160,9 +160,9 @@ Part 1, processed guitar:
 Part 2, tracked voice:
 
 11. Test rig: done 2026-10-24 (`tools/render.py`, REAPER headless through the `Effects/gitSynth-dev` link; `tools/compare_pitch.py`, `tools/track_all.py`; baselines in `notes/`). Coarse tracker: first version done 2026-10-24 (`jsfx/gitsynth/tracker.jsfx-inc`, test plugin `jsfx/gitSynth-part2.jsfx`); baseline `notes/tracker-step11.txt`. Original plan for this step: the coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
-12. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue.
-13. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed.
-14. Note logic: the octave guard, legato detection and mute detection. Measure.
+12. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue. Done 2026-10-24 (`jsfx/gitSynth-tuner.jsfx`); Rich tunes with it.
+13. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed. Tried 2026-10-24 and set aside: measured worse than the coarse tracker (3-4 cents flat, more wobble on high notes), and Rich confirmed by ear that coarse alone is better. Findings in `notes/fine-tracker-step13.md`; the code remains as an off-by-default option.
+14. Note logic: the octave guard, legato detection and mute detection. Measure. Done 2026-10-24 in the Part 2 test plugin: mute at each pick, 5 ms attack skip and confirmation; within a note a 70-cent follow zone, 16 ms persistence for changes and 65 ms beyond a fifth; mute detection (12 dB fall in 40 ms). Rich: "much improved", bends and vibrato tracked fine, rare misfires only when playing sloppily. Measured with `tools/glitch.py` and `tools/onset_junk.py`; lock 6-16 ms after the pick.
 15. Voice A with all controls, including the pitch modes, and the Part 1 / Part 2 mix.
 16. Attack masking.
 17. Voice B, the waveguide tube.
