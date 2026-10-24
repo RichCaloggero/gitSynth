@@ -1,6 +1,6 @@
-desc:gitSynth Part 2 - tracked voice (step 13: fine tracker test)
-// Mono guitar in on channel 1. A sine at the tracked pitch, following the
-// guitar's loudness, goes to channels 1 and 2. For testing, channel 3
+desc:gitSynth Part 2 - tracked voice (step 15: Voice A oscillators)
+// Mono guitar in on channel 1. An oscillator at the tracked pitch, following
+// the guitar's loudness, goes to channels 1 and 2. For testing, channel 3
 // carries the pitch (Hz / 2000, 0 when no pitch) and channel 4 the
 // coarse tracker's aperiodicity (0 = clean pitch, 1 = noise), or with the
 // fine tracker on, 1 while it is locked.
@@ -17,10 +17,18 @@ desc:gitSynth Part 2 - tracked voice (step 13: fine tracker test)
 
 slider1:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
 slider2:max_aper=0.3<0.05,1,0.01>Pitch confidence limit (aperiodicity)
-slider3:out_db=-6<-24,12,0.1>Output level (dB)
-slider4:mix=100<0,100,1>Dry/wet (%)
-slider5:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
-slider6:skip_ms=5<0,60,1>Attack skip (ms)
+slider3:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
+slider4:skip_ms=5<0,60,1>Attack skip (ms)
+
+slider6:wave=2<0,4,1{Sine,Triangle,Saw,Square,Pulse}>Waveform
+slider7:bright=50<0,100,1>Brightness (%)
+slider8:pitch_mode=0<0,1,1{Follow playing,Snap to semitones}>Pitch mode
+slider9:snap_pct=100<0,100,1>Snap strength (%)
+slider10:glide_ms=0<0,1000,1>Glide (ms)
+slider11:transpose=0<-24,24,1>Transpose (semitones)
+
+slider13:mix=100<0,100,1>Dry/wet (%)
+slider14:out_db=-6<-24,12,0.1>Output level (dB)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/tracker.jsfx-inc
@@ -74,10 +82,17 @@ voice_gain = 0;
 voice_c = 1 - exp(-1 / (0.003 * srate));
 pitch = 0;
 osc_phase = 0;
+osc.blosc(110, 0.5, 0);
+voice_m = 0;         // sounding pitch, in MIDI note units (69 = A4)
 
 @slider
 outg = 10 ^ (out_db / 20);
 wet = mix / 100;
+// Waveform: 0 sine (our own), otherwise cookDSP's band-limited oscillator
+// (types 3 triangle, 0 saw, 2 square, 4 pulse); brightness is its sharpness.
+osc.blosc_set_type(wave == 1 ? 3 : wave == 2 ? 0 : wave == 3 ? 2 : 4);
+osc.blosc_set_sharp(bright / 100);
+glide_c = glide_ms > 0 ? 1 - exp(-1 / (glide_ms * 0.001 * srate)) : 1;
 
 @sample
 x = spl0;
@@ -174,14 +189,28 @@ lvl_tick >= ms_samples ? (
 );
 !gate_open ? voiced = 0;
 
-// Sine at the tracked pitch, with the guitar's loudness.
+// Pitch shaping: follow the playing exactly, or pull it towards the nearest
+// semitone by the snap strength; transpose; then glide between notes. A note
+// that starts from silence jumps straight to its pitch (no glide in).
 amp += (a > amp ? amp_att_c : amp_rel_c) * (a - amp);
 pitch > 0 ? (
-  osc_phase += pitch / srate;
-  osc_phase >= 1 ? osc_phase -= 1;
+  m = 69 + 12 * log(pitch / 440) / log(2);
+  pitch_mode ? m += snap_pct / 100 * (floor(m + 0.5) - m);
+  m += transpose;
+  voice_gain < 0.01 || voice_m <= 0 ? voice_m = m : voice_m += glide_c * (m - voice_m);
+  vhz = 440 * 2 ^ ((voice_m - 69) / 12);
+  vhz = min(vhz, 0.45 * srate);
+  wave == 0 ? (
+    osc_phase += vhz / srate;
+    osc_phase >= 1 ? osc_phase -= 1;
+    o = sin(2 * $pi * osc_phase);
+  ) : (
+    osc.blosc_set_freq(vhz);
+    o = osc.blosc_do();
+  );
 );
 voice_gain += voice_c * (voiced - voice_gain);    // 3 ms fade in and out
-voice = sin(2 * $pi * osc_phase) * amp * gate_open * voice_gain;
+voice = o * amp * gate_open * voice_gain;
 
 y = (x + wet * (voice - x)) * outg;
 spl0 = spl1 = y;
