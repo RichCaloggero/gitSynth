@@ -52,13 +52,13 @@ The signal passes through these stages in order:
 6. Body resonance: a few fixed band-pass peaks shaped like the response of a violin or cello body, so the sound seems to come from a wooden instrument. It works on chords.
 7. Frequency-shifter ensemble: it shifts every harmonic by the same few Hz, using a Hilbert transform built from all-pass filters, so it adds no latency. Two copies shifted in opposite directions spread one guitar into a section-like sound. Its range is limited to a few Hz, because larger shifts destroy the sound.
 8. Vibrato: a short delay line whose delay time wobbles, which bends every note of a chord together. It can start after a delay once the note has swelled in, timed from the swell stage.
-9. Dynamic freeze: when a note or chord has settled, capture a short slice and loop it smoothly with crossfades, so it sustains for ever. A new pick attack, found by an onset detector, releases the frozen sound and captures the new one. A threshold sets how strong an attack must be to count. The onset detector is shared with Part 2.
+9. Dynamic freeze: dropped 2026-10-23. Hold already gives clean, near-endless sustain, and an attack-released freeze added little beyond it. A manually triggered, layered freeze (a pad that holds while live playing continues on top) would be distinct, but needs a MIDI foot trigger; reconsider if one is available. The last version is in git history (commit d8d2a55).
 10. Vowel filter: two or three band-pass filters at the formants of a vowel. The envelope moves them between two chosen vowels, for "wah-ow" and talk-box-like sounds. It works on chords.
 11. Resonator bank: tuned comb filters set to fixed notes, chosen as a root note plus a chord or scale. The guitar makes them ring, for a sitar-like or drone shimmer.
 12. Square-up and octave-down, optional, single notes only: a comparator with hysteresis makes a square wave at the string's frequency. A flip-flop halves it to one octave below, and the result is shaped by the guitar's envelope. It feeds the filter in parallel with the guitar and has its own mix level. There is no octave-up stage; Rich finds it too metallic.
 13. Output: dry/wet mix and output level.
 
-Part 1 centres on chord-friendly processing of the swelled, violin-like sound (decided 2026-10-23). The square wave is optional. The order of stages 9 to 11 is provisional and may change once they can be heard. In the code, freeze runs before the ensemble and vibrato, so they keep moving on a frozen sound.
+Part 1 centres on chord-friendly processing of the swelled, violin-like sound (decided 2026-10-23). The square wave is optional. The order of stages 9 to 11 is provisional and may change once they can be heard.
 
 Later options, if wanted: a phaser, and a second filter.
 
@@ -71,7 +71,6 @@ Later options, if wanted: a phaser, and a second filter.
 - Body resonance: body type (violin, viola or cello), amount.
 - Ensemble: shift amount in Hz (a small range), number of copies and mix.
 - Vibrato: depth, rate, onset delay and fade-in time.
-- Freeze: on or off, attack threshold for release, loop crossfade length, and mix.
 - Vowel filter: start vowel, end vowel, sweep amount and mix.
 - Resonator bank: root note, chord or scale, decay time, brightness and mix.
 - Square wave level and octave-down level.
@@ -153,7 +152,7 @@ Part 1, processed guitar:
 4. Body resonance. Done 2026-10-23.
 5. Frequency-shifter ensemble. Done 2026-10-23. Then moved into a shared library (`jsfx/gitsynth/freqshift.jsfx-inc`) with an LFO (sine, triangle, random step, random smooth) that wobbles each copy's shift, and also released as a standalone effect, `jsfx/gitSynth-freqshift.jsfx`.
 6. Vibrato with delayed onset. Done 2026-10-23. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
-7. Dynamic freeze, including the onset detector. Shared library `jsfx/gitsynth/freeze.jsfx-inc`: two capture buffers, four random Hann grains; placed before the ensemble and vibrato so they keep moving on the frozen sound. Attack threshold slider shared with vibrato.
+7. Dynamic freeze: dropped 2026-10-23 (see stage 9 above). The attack threshold slider it added stays, for the vibrato onset.
 8. Vowel filter.
 9. Resonator bank.
 10. Optional: square-up and octave-down.
@@ -173,7 +172,6 @@ Part 2, tracked voice:
 
 - Part 1 cannot change the note's pitch or remove the guitar's character entirely. It shapes the string's sound but does not replace it.
 - Part 1's square-up and octave stages glitch on chords and can misfire on strong harmonics.
-- Dynamic freeze depends on spotting attacks. Soft legato notes, such as hammer-ons, may not release it, and a loud pick on a ringing note may release it too early.
 - The resonator bank rings at fixed notes, so it suits playing in one key and clashes outside that key.
 - On low E, Part 2 has about 25 ms of pitch-lock delay that physics does not allow us to remove. It is masked, not eliminated.
 - Part 2 does not support chords. A chord will make the tracker lock onto one note, or jump between notes.
