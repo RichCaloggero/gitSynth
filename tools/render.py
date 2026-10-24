@@ -119,8 +119,13 @@ def render(clip, plugin="gitSynth-part1.jsfx", out=None, settings=None,
     with open(rpp, "w", encoding="utf-8") as fh:
         fh.write(build_rpp(clip, plugin, values, out_wav, channels,
                            sf.info(clip).duration))
+    # Start REAPER minimised and without taking focus, so a render does not
+    # pull the screen reader away from what Rich is doing.
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 7    # SW_SHOWMINNOACTIVE
     subprocess.run([REAPER, "-newinst", "-nosplash", "-renderproject", rpp],
-                   timeout=timeout)
+                   timeout=timeout, startupinfo=si)
     if not os.path.exists(out_wav):
         sys.exit(f"REAPER did not write {out_wav}")
     return out_wav
