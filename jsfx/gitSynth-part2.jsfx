@@ -1,13 +1,23 @@
-desc:gitSynth Part 2 - tracked voice (step 11: coarse tracker test)
+desc:gitSynth Part 2 - tracked voice (step 13: fine tracker test)
 // Mono guitar in on channel 1. A sine at the tracked pitch, following the
 // guitar's loudness, goes to channels 1 and 2. For testing, channel 3
 // carries the pitch (Hz / 2000, 0 when no pitch) and channel 4 the
-// aperiodicity (0 = clean pitch, 1 = noise).
+// coarse tracker's aperiodicity (0 = clean pitch, 1 = noise), or with the
+// fine tracker on, 1 while it is locked.
+//
+// Tracker "Coarse + fine": the coarse tracker (YIN) seeds the fine tracker
+// at each new note; once the fine tracker has locked, its pitch is used for
+// as long as it keeps measuring cycles (switching back and forth between the
+// two trackers made the pitch wobble). If
+// the coarse tracker disagrees with it by more than 1.5 semitones for about
+// 50 ms (a legato note change, or the fine tracker lost the note), the fine
+// tracker is restarted from the coarse pitch.
 
 slider1:gate_db=-45<-90,-20,0.5>Gate threshold (dB)
 slider2:max_aper=0.3<0.05,1,0.01>Pitch confidence limit (aperiodicity)
 slider3:out_db=-6<-24,12,0.1>Output level (dB)
 slider4:mix=100<0,100,1>Dry/wet (%)
+slider5:tracker=0<0,1,1{Coarse only,Coarse + fine (experimental)}>Tracker
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/tracker.jsfx-inc
@@ -36,7 +46,18 @@ level = amp = 0;
 gate_open = 0;
 
 trk.gs_tracker_init(FMIN, FMAX);
+pll.gs_pll_init();
 voiced = 0;
+// Attack detector (as Part 1): fast envelope rising 6 dB above a 30 ms copy.
+fast_att_c = 1 - exp(-1 / (0.001 * srate));
+fast_rel_c = 1 - exp(-1 / (0.05 * srate));
+onset_c = 1 - exp(-1 / (0.03 * srate));
+env_fast = onset_slow = 0;
+need_seed = 1;
+disagree = 0;
+pll_used = 0;
+DISAGREE_CENTS = 150;
+DISAGREE_N = 40;     // coarse estimates, about 50 ms
 pitch = 0;
 osc_phase = 0;
 
@@ -63,11 +84,35 @@ gate_open ? (
   level_db > gate_db ? gate_open = 1;
 );
 
-// Pitch: accept an estimate only while the gate is open and it is clean.
+// Attack detector: a new note needs a fresh seed for the fine tracker.
+env_fast += (a > env_fast ? fast_att_c : fast_rel_c) * (a - env_fast);
+onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
+((gate_open && env_fast > 2 * onset_slow + 0.0001) || !gate_open) ? need_seed = 1;
+
+// Coarse pitch: accept an estimate only while the gate is open and it is clean.
 trk.gs_tracker_do(x);
+reseed = 0;
 trk.fresh ? (
-  voiced = gate_open && trk.aper < max_aper;
-  voiced ? pitch = trk.hz;
+  coarse_ok = gate_open && trk.aper < max_aper;
+  coarse_ok ? (
+    need_seed ? (
+      reseed = 1; need_seed = 0; disagree = 0;
+    ) : pll.hz > 0 && abs(1200 * log(trk.hz / pll.hz) / log(2)) > DISAGREE_CENTS ? (
+      disagree += 1;
+      disagree >= DISAGREE_N ? (reseed = 1; disagree = 0;);
+    ) : disagree = 0;
+  );
+  !tracker ? (voiced = coarse_ok; voiced ? pitch = trk.hz;);
+);
+pll.gs_pll_do(x, trk.hz, tracker && reseed);
+pll.locked ? pll_used = 1;
+!pll.alive ? pll_used = 0;
+tracker ? (
+  pll_used ? (
+    voiced = 1; pitch = pll.hz;
+  ) : trk.fresh ? (
+    voiced = coarse_ok; voiced ? pitch = trk.hz;
+  );
 );
 !gate_open ? voiced = 0;
 
@@ -82,4 +127,4 @@ voice = sin(2 * $pi * osc_phase) * amp * gate_open;
 y = (x + wet * (voice - x)) * outg;
 spl0 = spl1 = y;
 spl2 = voiced ? pitch / 2000 : 0;
-spl3 = trk.aper;
+spl3 = tracker ? pll.locked : trk.aper;

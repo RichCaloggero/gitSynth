@@ -158,3 +158,130 @@ function gs_tracker_do(x)
     );
   );
 );
+
+// ---------------------------------------------------------------------------
+// Fine tracker ("PLL"): measures the string's fundamental cycle by cycle.
+//   gs_pll_init()
+//   gs_pll_do(x seed_hz reseed)   call once per sample
+//     seed_hz: starting pitch from the coarse tracker; reseed: 1 to restart
+//     from seed_hz (a new note, or the fine tracker lost the note)
+//   this.hz      latest pitch in Hz (0 until the first cycle is measured)
+//   this.locked  1 once consecutive cycles agree
+//   this.alive   1 while cycles are still being measured (within 3 periods)
+//
+// Two band-pass filters centred on the note isolate its fundamental; the
+// centre follows the measured pitch, so bends are followed. A zero crossing
+// with hysteresis marks each cycle, timed to a fraction of a sample, so the
+// pitch updates every cycle: every 12 ms on low E, every 1 ms high up. The
+// pitch is the average over the cycles of about the last 10 ms (2 to 16
+// cycles): at least two, which cancels most of the wobble a strong 2nd
+// harmonic adds to single cycles, and more on high notes, whose short cycles
+// are timed less precisely. A cycle more than 35% away from the filter
+// centre is rejected (a harmonic or noise crossing).
+
+GS_PLL_Q = 1.5;          // each of the two band-pass stages
+GS_PLL_AGREE = 30;       // cents: consecutive cycles this close count as locked
+GS_PLL_AVG_S = 0.01;     // average the cycles of about this long
+GS_PLL_MAXC = 16;        // most cycles averaged
+GS_PLL_FOLLOW = 0.05;    // share of the gap to the measured pitch the filter moves per cycle
+
+function gs_pll_bp(x fc)
+  local(g k a1 a2 a3 v1 v2 v3)
+(
+  g = tan($pi * fc / srate);
+  k = 1 / GS_PLL_Q;
+  a1 = 1 / (1 + g * (g + k));
+  a2 = g * a1;
+  a3 = g * a2;
+  v3 = x - this.ic2;
+  v1 = a1 * this.ic1 + a2 * v3;
+  v2 = this.ic2 + a2 * this.ic1 + a3 * v3;
+  this.ic1 = 2 * v1 - this.ic1;
+  this.ic2 = 2 * v2 - this.ic2;
+  k * v1;
+);
+
+function gs_pll_init()
+(
+  this.s1.ic1 = this.s1.ic2 = this.s2.ic1 = this.s2.ic2 = 0;
+  this.fc = 0;
+  this.hz = 0;
+  this.locked = this.alive = 0;
+  this.n = 0;
+  this.prev = 0;
+  this.env = 0;
+  this.env_c = 1 - exp(-1 / (0.01 * srate));
+  this.armed = 0;
+  this.last_t = -1;
+  this.per = memalloc(GS_PLL_MAXC);   // ring of accepted periods, in samples
+  this.np = this.wp = 0;               // periods held, next write position
+  this.f_prev = 0;
+  this.agree = this.bad = 0;
+  this.misses = 0;
+);
+
+function gs_pll_do(x seed_hz reseed)
+  local(b th t p f per want sum i j)
+(
+  reseed && seed_hz > 0 ? (
+    this.fc = seed_hz;
+    this.hz = 0;
+    this.locked = this.alive = 0;
+    this.last_t = -1;
+    this.np = 0;
+    this.agree = this.bad = 0;
+    this.misses = 0;
+  );
+  this.fc > 0 ? (
+    b = this.s2.gs_pll_bp(this.s1.gs_pll_bp(x, this.fc), this.fc);
+    this.env += this.env_c * (abs(b) - this.env);
+    th = 0.3 * this.env;
+    b < -th ? this.armed = 1;
+    this.armed && b >= 0 && this.prev < 0 ? (
+      this.armed = 0;
+      t = this.n - 1 + (-this.prev) / (b - this.prev);   // fractional crossing time
+      this.last_t >= 0 ? (
+        p = t - this.last_t;
+        f = srate / p;
+        f > 0.74 * this.fc && f < 1.35 * this.fc ? (
+          per = this.per;
+          per[this.wp] = p;
+          this.wp = (this.wp + 1) % GS_PLL_MAXC;
+          this.np = min(GS_PLL_MAXC, this.np + 1);
+          want = min(this.np, max(2, min(GS_PLL_MAXC, floor(GS_PLL_AVG_S * f + 0.5))));
+          sum = 0; i = 0;
+          loop(want,
+            j = (this.wp - 1 - i + GS_PLL_MAXC) % GS_PLL_MAXC;
+            sum += per[j];
+            i += 1;
+          );
+          this.hz = want * srate / sum;
+          this.alive = 1;
+          // Re-centre the band-pass slowly: it is wide, and re-centring on every
+          // cycle shifts its phase, which fed back into the next measurement
+          // as a regular wobble of about 3 cents.
+          this.fc += GS_PLL_FOLLOW * (this.hz - this.fc);
+          // Lock after two agreeing cycles; unlock only after three
+          // disagreeing cycles in a row, so the lock does not flicker.
+          this.f_prev > 0 && abs(1200 * log(f / this.f_prev) / log(2)) < GS_PLL_AGREE ? (
+            this.agree += 1; this.bad = 0;
+          ) : (
+            this.agree = 0; this.bad += 1;
+          );
+          this.f_prev = f;
+          this.agree >= 2 ? this.locked = 1;
+          this.bad >= 3 ? this.locked = 0;
+          this.misses = 0;
+        ) : (
+          this.misses += 1;
+          this.misses > 4 ? this.locked = 0;
+        );
+      );
+      this.last_t = t;
+    );
+    // No cycle for three periods: the note has gone.
+    this.last_t >= 0 && this.n - this.last_t > 3 * srate / this.fc ? this.locked = this.alive = 0;
+    this.prev = b;
+  );
+  this.n += 1;
+);
