@@ -1,9 +1,11 @@
-desc:gitSynth Part 1 - processed guitar (step 6: vibrato)
+desc:gitSynth Part 1 - processed guitar (step 7: freeze)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
 // Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
 // -> waveshaper -> envelope-swept resonant state-variable filter
-// -> body resonance -> frequency-shifter ensemble (can be stereo)
+// -> body resonance -> freeze -> frequency-shifter ensemble (can be stereo)
 // -> vibrato -> dry/wet -> output level.
+// Freeze comes before the ensemble and vibrato so they keep moving on a
+// frozen sound instead of being frozen into it.
 // The filter sweep follows picking strength before reshaping.
 
 slider1:cutoff_hz=300<40,8000,1:log>Base cutoff (Hz)
@@ -37,10 +39,16 @@ slider28:vib_rate=5.5<0.5,12,0.1:log>Vibrato rate (Hz)
 slider29:vib_shape=0<0,3,1{Sine,Triangle,Random step,Random smooth}>Vibrato shape
 slider30:vib_onset_ms=300<0,2000,10>Vibrato onset delay (ms)
 slider31:vib_fade_ms=500<0,2000,10>Vibrato fade-in (ms)
+slider32:frz_on=0<0,1,1{Off,On}>Freeze
+slider33:frz_grain_ms=150<40,400,1:log>Freeze grain length (ms)
+slider34:frz_xfade_ms=400<20,3000,1:log>Freeze crossfade (ms)
+slider35:frz_mix=100<0,100,1>Freeze mix (%)
+slider36:onset_db=6<3,20,0.5>Attack threshold (dB)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/freqshift.jsfx-inc
 import gitsynth/vibrato.jsfx-inc
+import gitsynth/freeze.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -78,7 +86,7 @@ gate_att_c = 1 - exp(-1 / (0.002 * srate));      // 2 ms
 gate_rel_c = 1 - exp(-1 / (0.15 * srate));       // 150 ms
 onset_c = 1 - exp(-1 / (0.03 * srate));          // 30 ms, slow side of the attack detector
 vib_fall_c = 1 - exp(-1 / (0.1 * srate));        // 100 ms, vibrato fade-out on a new note
-ONSET_RATIO = 2;     // a jump of 6 dB within about 30 ms counts as a new note
+SETTLE_MS = 150;     // freeze waits this long after an attack (plus the note attack time)
 
 env = 0;
 f_ic1 = f_ic2 = 0;
@@ -134,6 +142,9 @@ onset_slow = 0;
 vib_timer = 0;
 vib_gain = 0;
 
+// Freeze, from gitsynth/freeze.jsfx-inc.
+frz.gs_freeze_init();
+
 @slider
 att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
 rel_c = 1 - exp(-1 / (rel_ms * 0.001 * srate));
@@ -145,6 +156,7 @@ t_cut = log(cutoff_hz) / log(2);        // base cutoff in octaves
 t_depth = direction ? -depth_oct : depth_oct;
 t_wet = mix / 100;
 t_out = 10 ^ (out_db / 20);
+onset_ratio = 10 ^ (onset_db / 20);
 t_sus = env_mode ? 1 : sustain / 100;   // Hold is full sustain
 // Drive of 0 dB bypasses the shaper; otherwise keep a -12 dBFS signal at
 // about the same level whatever the drive.
@@ -217,11 +229,14 @@ gate_open ? (
 );
 gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
 
-// Attack detector for the vibrato onset: a new note is a sudden rise of the
-// fast envelope above a 30 ms copy of it. The vibrato starts after the onset
-// delay and fades in; a new note fades it out over 100 ms and starts again.
+// Attack detector, shared by freeze and vibrato: a new note is a rise of the
+// fast envelope above a 30 ms copy of it by the attack threshold.
 onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
-(env_fast > ONSET_RATIO * onset_slow + 0.0001 || !gate_open) ? (
+attack = gate_open && env_fast > onset_ratio * onset_slow + 0.0001;
+
+// Vibrato onset: starts after the onset delay and fades in; a new note fades
+// it out over 100 ms and starts again. It keeps going on a frozen sound.
+(attack || (!gate_open && !frz.frozen)) ? (
   vib_timer = 0;
 ) : (
   vib_timer += 1 / srate;
@@ -272,6 +287,10 @@ body_amt > 0 ? (
   );
   y *= body_makeup;
 );
+
+// Freeze: holds the settled note or chord until the next attack.
+y = frz.gs_freeze_do(y, attack, gate_open, frz_on, frz_grain_ms, frz_xfade_ms,
+                     SETTLE_MS + swell_ms, frz_mix / 100);
 
 // Frequency-shifter ensemble: copies of the sound shifted up (and down) by a
 // few Hz, mixed back with it. Two copies can be spread across the stereo field.

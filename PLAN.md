@@ -58,7 +58,7 @@ The signal passes through these stages in order:
 12. Square-up and octave-down, optional, single notes only: a comparator with hysteresis makes a square wave at the string's frequency. A flip-flop halves it to one octave below, and the result is shaped by the guitar's envelope. It feeds the filter in parallel with the guitar and has its own mix level. There is no octave-up stage; Rich finds it too metallic.
 13. Output: dry/wet mix and output level.
 
-Part 1 centres on chord-friendly processing of the swelled, violin-like sound (decided 2026-10-23). The square wave is optional. The order of stages 9 to 11 is provisional and may change once they can be heard.
+Part 1 centres on chord-friendly processing of the swelled, violin-like sound (decided 2026-10-23). The square wave is optional. The order of stages 9 to 11 is provisional and may change once they can be heard. In the code, freeze runs before the ensemble and vibrato, so they keep moving on a frozen sound.
 
 Later options, if wanted: a phaser, and a second filter.
 
@@ -152,8 +152,8 @@ Part 1, processed guitar:
 3. Waveshaper. Done 2026-10-23.
 4. Body resonance. Done 2026-10-23.
 5. Frequency-shifter ensemble. Done 2026-10-23. Then moved into a shared library (`jsfx/gitsynth/freqshift.jsfx-inc`) with an LFO (sine, triangle, random step, random smooth) that wobbles each copy's shift, and also released as a standalone effect, `jsfx/gitSynth-freqshift.jsfx`.
-6. Vibrato with delayed onset. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
-7. Dynamic freeze, including the onset detector.
+6. Vibrato with delayed onset. Done 2026-10-23. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
+7. Dynamic freeze, including the onset detector. Shared library `jsfx/gitsynth/freeze.jsfx-inc`: two capture buffers, four random Hann grains; placed before the ensemble and vibrato so they keep moving on the frozen sound. Attack threshold slider shared with vibrato.
 8. Vowel filter.
 9. Resonator bank.
 10. Optional: square-up and octave-down.
