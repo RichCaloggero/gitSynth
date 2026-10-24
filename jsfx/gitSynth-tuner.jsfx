@@ -1,0 +1,168 @@
+desc:gitSynth Tuner (accessible)
+// Guitar tuner built on the gitSynth pitch tracker.
+// Readout: sliders 10-14 are written by the plugin about five times a second,
+// so a screen reader can read them in REAPER's FX parameter list.
+// Audio cues (choose one):
+//   Clicks: the further off, the faster the clicks; a high click means sharp,
+//     a low click means flat; silent when in tune, with a short chime when
+//     the note first comes into tune.
+//   Reference tone: a steady tone at the nearest note in tune; tune until
+//     the beating between it and the string slows and stops.
+// Debug: channel 3 carries the cents reading / 100 and channel 4 the
+// nearest note number / 128, for the gitSynth test rig.
+
+slider1:ref_a=440<430,450,0.1>Reference A4 (Hz)
+slider2:cue=1<0,2,1{Off,Clicks,Reference tone}>Audio cue
+slider3:cue_db=-18<-40,0,0.5>Cue level (dB)
+slider4:tol=3<1,10,0.5>In-tune tolerance (cents)
+slider5:guitar_pct=100<0,100,1>Guitar level (%)
+slider6:gate_db=-50<-90,-20,0.5>Gate threshold (dB)
+
+slider10:r_note=0<0,11,1{C,C#,D,D#,E,F,F#,G,G#,A,A#,B}>Note (read-only)
+slider11:r_oct=0<0,8,1>Octave (read-only)
+slider12:r_cents=0<-50,50,0.1>Cents, minus is flat (read-only)
+slider13:r_state=0<0,3,1{No signal,Flat,In tune,Sharp}>Tuning (read-only)
+slider14:r_hz=0<0,2000,0.01>Frequency (Hz, read-only)
+
+import cookdsp/cookdsp.jsfx-inc
+import gitsynth/tracker.jsfx-inc
+
+in_pin:Guitar
+out_pin:Left
+out_pin:Right
+out_pin:Debug cents
+out_pin:Debug note
+
+@init
+__memory_next = 0;   // cookDSP's memalloc starts again on every re-init
+GATE_HYST_DB = 6;
+MAX_APER = 0.2;      // only clean pitch estimates count
+REPORT_S = 0.2;      // readout update interval
+CONFIRM = 30;        // estimates a new reading must repeat for (about 40 ms)
+
+hp_g = tan($pi * 70 / srate); hp_k = sqrt(2);
+hp_a1 = 1 / (1 + hp_g * (hp_g + hp_k)); hp_a2 = hp_g * hp_a1; hp_a3 = hp_g * hp_a2;
+hp_ic1 = hp_ic2 = 0;
+level_att_c = 1 - exp(-1 / (0.001 * srate));
+level_rel_c = 1 - exp(-1 / (0.2 * srate));
+level = 0; gate_open = 0;
+
+trk.gs_tracker_init(70, 1400);
+
+// Smoothed reading, in MIDI note units (69 = A4).
+note_s = 0; have = 0;
+cand_m = 0; cand_n = 0;
+est_rate = srate / (GS_TRK_HOP * trk.dec);       // tracker estimates per second
+smooth_c = 1 - exp(-1 / (0.08 * est_rate));      // 80 ms smoothing
+silent = 0;          // samples since the last clean estimate
+report_n = 0;
+
+in_tune_for = 0; chimed = 0;
+click_ph = 0; click_t = 1; click_f = 0;
+chime_t = 1; ref_ph = 0; ref_amp = 0;
+
+@slider
+cue_g = 10 ^ (cue_db / 20);
+guitar_g = guitar_pct / 100;
+
+@sample
+x = spl0;
+v3 = x - hp_ic2;
+v1 = hp_a1 * hp_ic1 + hp_a2 * v3;
+v2 = hp_ic2 + hp_a2 * hp_ic1 + hp_a3 * v3;
+hp_ic1 = 2 * v1 - hp_ic1;
+hp_ic2 = 2 * v2 - hp_ic2;
+x = x - hp_k * v1 - v2;
+
+a = abs(x);
+level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level_db = 20 * log10(level + 0.0000000001);
+gate_open ? (
+  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
+) : (
+  level_db > gate_db ? gate_open = 1;
+);
+
+// Pitch reading: smooth clean estimates near the current note. A reading
+// far from it (a new note, or junk as a string is stopped) counts only once
+// it has repeated consistently for CONFIRM estimates (about 40 ms).
+trk.gs_tracker_do(x);
+silent += 1;
+trk.fresh && gate_open && trk.aper < MAX_APER ? (
+  m = 69 + 12 * log(trk.hz / ref_a) / log(2);
+  have && abs(m - note_s) <= 0.5 ? (
+    note_s += smooth_c * (m - note_s);
+    silent = 0;
+    cand_n = 0;
+  ) : (
+    cand_n > 0 && abs(m - cand_m) < 0.3 ? (
+      cand_n += 1;
+      cand_m += 0.2 * (m - cand_m);
+    ) : (
+      cand_m = m;
+      cand_n = 1;
+    );
+    cand_n >= CONFIRM ? (
+      note_s = cand_m;
+      have = 1;
+      silent = 0;
+      cand_n = 0;
+    );
+  );
+);
+silent > 0.3 * srate ? have = 0;      // no clean pitch for 300 ms: no signal
+
+near = floor(note_s + 0.5);
+cents = (note_s - near) * 100;
+state = !have ? 0 : abs(cents) <= tol ? 2 : cents < 0 ? 1 : 3;
+
+// Readout sliders, about five times a second.
+report_n += 1;
+report_n >= REPORT_S * srate ? (
+  report_n = 0;
+  have ? (
+    r_note = near - 12 * floor(near / 12);
+    r_oct = floor(near / 12) - 1;
+    r_cents = floor(cents * 10 + 0.5) / 10;
+    r_hz = floor(ref_a * 2 ^ ((note_s - 69) / 12) * 100 + 0.5) / 100;
+  );
+  r_state = state;
+  sliderchange(slider10); sliderchange(slider11); sliderchange(slider12);
+  sliderchange(slider13); sliderchange(slider14);
+);
+
+// Audio cues.
+cue_out = 0;
+cue == 1 ? (
+  // Clicks: rate grows with the error; pitch says sharp (high) or flat (low).
+  state == 1 || state == 3 ? (
+    click_ph += min(25, 1.5 + 0.5 * abs(cents)) / srate;
+    click_ph >= 1 ? (click_ph -= 1; click_t = 0; click_f = state == 3 ? 2000 : 700;);
+  );
+  click_t < 0.006 ? (
+    cue_out += sin(2 * $pi * click_f * click_t) * (1 - click_t / 0.006);
+    click_t += 1 / srate;
+  );
+  // Chime once when the note has been in tune for 250 ms.
+  state == 2 ? in_tune_for += 1 : (in_tune_for = 0; chimed = 0;);
+  !chimed && in_tune_for > 0.25 * srate ? (chimed = 1; chime_t = 0;);
+  chime_t < 0.25 ? (
+    cue_out += 0.5 * sin(2 * $pi * (chime_t < 0.1 ? 1320 : 1760) * chime_t)
+               * (chime_t < 0.1 ? 1 - chime_t / 0.1 : 1 - (chime_t - 0.1) / 0.15);
+    chime_t += 1 / srate;
+  );
+) : cue == 2 ? (
+  // Reference tone at the nearest note, fading out 0.5 s after the signal.
+  ref_amp += (have ? 0.002 : -0.00004) * 48000 / srate;
+  ref_amp = max(0, min(1, ref_amp));
+  ref_amp > 0 ? (
+    ref_ph += ref_a * 2 ^ ((near - 69) / 12) / srate;
+    ref_ph >= 1 ? ref_ph -= 1;
+    cue_out = 0.5 * sin(2 * $pi * ref_ph) * ref_amp;
+  );
+);
+
+out = x * guitar_g + cue_out * cue_g;
+spl0 = spl1 = out;
+spl2 = have ? cents / 100 : 0;
+spl3 = have ? near / 128 : 0;
