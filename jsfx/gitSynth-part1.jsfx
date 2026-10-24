@@ -58,7 +58,8 @@ HP_HZ = 70;          // input high-pass; also removes DC
 FLOOR_DB = -48;      // envelope level that gives no sweep
 RANGE_DB = 48;       // envelope span from no sweep to full sweep
 SMOOTH_MS = 10;      // slider smoothing, avoids zipper noise
-REF_DB = -18;        // level that sustain pulls notes towards
+SUS_MARGIN_DB = 3;   // sustain holds a note this far below its starting level
+NOTE_REF_SAMPLES = floor(0.03 * srate);   // how long after an attack its level is measured
 MAX_GAIN_DB = 30;    // most that sustain will boost a quiet note
 GATE_HYST_DB = 6;    // gate closes this far below its threshold
 SHAPER_REF = 0.25;   // typical level (-12 dBFS) kept steady as drive rises
@@ -89,6 +90,7 @@ env = 0;
 f_ic1 = f_ic2 = 0;
 env_fast = env_slow = 0;
 level = 0;
+note_ref_db = -200; note_ref_n = 0;
 gate_open = 0;
 gate_gain = 0;
 
@@ -219,7 +221,6 @@ swell_gain = env_slow / (env_fast + 0.000000001);
 // Sustain and gate, from the peak level before the swell.
 level += (a > level ? level_att_c : level_rel_c) * (a - level);
 level_db = 20 * log10(level + 0.0000000001);
-sus_db = min(MAX_GAIN_DB, sus * (REF_DB - level_db));
 gate_open ? (
   level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
 ) : (
@@ -231,6 +232,14 @@ gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
 // fast envelope above a 30 ms copy of it by the attack threshold.
 onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
 attack = gate_open && env_fast > onset_ratio * onset_slow + 0.0001;
+
+// Sustain lifts a decaying note back towards its own starting level (the
+// loudest point in the first 30 ms after its attack, less SUS_MARGIN_DB). It
+// never turns a note down, so hard notes stay hard and soft notes soft.
+attack ? (note_ref_db = level_db; note_ref_n = NOTE_REF_SAMPLES;);
+note_ref_n > 0 ? (note_ref_n -= 1; note_ref_db = max(note_ref_db, level_db););
+(level_db > note_ref_db || !gate_open) ? note_ref_db = level_db;   // nothing to lift between notes
+sus_db = min(MAX_GAIN_DB, max(0, sus * (note_ref_db - SUS_MARGIN_DB - level_db)));
 
 // Vibrato onset: starts after the onset delay and fades in; a new note fades
 // it out over 100 ms and starts again.
