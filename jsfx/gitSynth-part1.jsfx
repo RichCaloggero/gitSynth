@@ -1,8 +1,8 @@
-desc:gitSynth Part 1 - processed guitar (step 7: freeze removed)
+desc:gitSynth Part 1 - processed guitar (step 8: vowel filter)
 // Mono guitar in on channel 1; the result goes to channels 1 and 2.
 // Stages: input high-pass -> envelope reshaping (swell, sustain, gate)
 // -> waveshaper -> envelope-swept resonant state-variable filter
-// -> body resonance -> frequency-shifter ensemble (can be stereo)
+// -> body resonance -> vowel filter -> frequency-shifter ensemble (can be stereo)
 // -> vibrato -> dry/wet -> output level.
 // The filter sweep follows picking strength before reshaping.
 
@@ -38,10 +38,15 @@ slider29:vib_shape=0<0,3,1{Sine,Triangle,Random step,Random smooth}>Vibrato shap
 slider30:vib_onset_ms=300<0,2000,10>Vibrato onset delay (ms)
 slider31:vib_fade_ms=500<0,2000,10>Vibrato fade-in (ms)
 slider36:onset_db=6<3,20,0.5>Attack threshold (dB)
+slider37:vow_start=3<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel start
+slider38:vow_end=0<0,4,1{A (father),E (bed),I (beet),O (bought),U (boot)}>Vowel end
+slider39:vow_sweep=100<0,100,1>Vowel sweep (%)
+slider40:vow_mix=0<0,100,1>Vowel mix (%)
 
 import cookdsp/cookdsp.jsfx-inc
 import gitsynth/freqshift.jsfx-inc
 import gitsynth/vibrato.jsfx-inc
+import gitsynth/vowel.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -133,6 +138,9 @@ vib.gs_vibrato_init();
 onset_slow = 0;
 vib_timer = 0;
 vib_gain = 0;
+
+// Vowel filter, from gitsynth/vowel.jsfx-inc.
+vow.gs_vowel_init();
 
 
 @slider
@@ -277,6 +285,10 @@ body_amt > 0 ? (
   );
   y *= body_makeup;
 );
+
+// Vowel filter: picking strength (the same sweep amount as the main filter)
+// moves it from the start vowel towards the end vowel.
+y = vow.gs_vowel_do(y, amt * vow_sweep / 100, vow_start, vow_end, vow_mix / 100);
 
 // Frequency-shifter ensemble: copies of the sound shifted up (and down) by a
 // few Hz, mixed back with it. Two copies can be spread across the stereo field.
