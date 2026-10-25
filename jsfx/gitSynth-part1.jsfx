@@ -46,6 +46,7 @@ slider44:vow_mix=0<0,100,1>Vowel mix (%)
 slider45:vow_q=2.5<1,12,0.1:log>Vowel band sharpness (Q, lower is smoother)
 
 import cookdsp/cookdsp.jsfx-inc
+import lib/svf.jsfx-inc
 import lib/freqshift.jsfx-inc
 import lib/vibrato.jsfx-inc
 import lib/vowel.jsfx-inc
@@ -70,12 +71,8 @@ smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
 nyq_limit = 0.45 * srate;
 
 // Input high-pass: fixed state-variable filter, Q 0.707.
-hp_g = tan($pi * HP_HZ / srate);
-hp_k = sqrt(2);
-hp_a1 = 1 / (1 + hp_g * (hp_g + hp_k));
-hp_a2 = hp_g * hp_a1;
-hp_a3 = hp_g * hp_a2;
-hp_ic1 = hp_ic2 = 0;
+hpf.gs_svf_init();
+hpf.gs_svf_set(HP_HZ, sqrt(2));
 
 // Fixed time constants for the reshaping detectors.
 fast_att_c = 1 - exp(-1 / (0.001 * srate));      // 1 ms
@@ -88,7 +85,7 @@ onset_c = 1 - exp(-1 / (0.03 * srate));          // 30 ms, slow side of the atta
 vib_fall_c = 1 - exp(-1 / (0.1 * srate));        // 100 ms, vibrato fade-out on a new note
 
 env = 0;
-f_ic1 = f_ic2 = 0;
+flt.gs_svf_init();
 env_fast = env_slow = 0;
 level = 0;
 note_ref_db = -200; note_ref_n = 0;
@@ -120,18 +117,7 @@ first = 1;
 // Body resonance: bell filters at the main resonances of a violin body.
 // Viola and cello use the same shape, scaled down in frequency.
 // These are approximate starting values, to be tuned by ear.
-BODY_N = 5;
-bfreq = memalloc(BODY_N); bgain = memalloc(BODY_N); bq = memalloc(BODY_N);
-ba1 = memalloc(BODY_N); ba2 = memalloc(BODY_N); ba3 = memalloc(BODY_N);
-bm1 = memalloc(BODY_N);                   // per-band coefficients
-bic1 = memalloc(BODY_N); bic2 = memalloc(BODY_N);   // per-band filter state
-bfreq[0] = 275;  bgain[0] = 6;  bq[0] = 4;     // air resonance
-bfreq[1] = 460;  bgain[1] = 5;  bq[1] = 5;     // lower main body resonance
-bfreq[2] = 550;  bgain[2] = 6;  bq[2] = 5;     // upper main body resonance
-bfreq[3] = 1500; bgain[3] = -4; bq[3] = 1.5;   // dip below the bridge hill
-bfreq[4] = 2500; bgain[4] = 7;  bq[4] = 1.2;   // bridge hill, gives the bite
-i = 0;
-loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
+bb0.gs_svf_init(); bb1.gs_svf_init(); bb2.gs_svf_init(); bb3.gs_svf_init(); bb4.gs_svf_init();
 
 // Frequency-shifter ensemble, from lib/freqshift.jsfx-inc.
 ens.gs_ensemble_init();
@@ -167,17 +153,12 @@ t_smix = drive_db > 0 ? shaper_mix / 100 : 0;
 
 // Body bells (trapezoidal state-variable bell filters).
 body_scale = body_type == 0 ? 1 : body_type == 1 ? 0.83 : 0.42;
-i = 0;
-loop(BODY_N,
-  bA = 10 ^ (bgain[i] * body_amt / 100 / 40);
-  bg = tan($pi * min(nyq_limit, bfreq[i] * body_scale) / srate);
-  bk = 1 / (bq[i] * bA);
-  ba1[i] = 1 / (1 + bg * (bg + bk));
-  ba2[i] = bg * ba1[i];
-  ba3[i] = bg * ba2[i];
-  bm1[i] = bk * (bA * bA - 1);
-  i += 1;
-);
+// Five bells at the main violin body resonances (gain in dB at 100%).
+bb0.gs_svf_bell_coef(min(nyq_limit, 275 * body_scale), 4, 6 * body_amt / 100);    // air resonance
+bb1.gs_svf_bell_coef(min(nyq_limit, 460 * body_scale), 5, 5 * body_amt / 100);    // lower main body resonance
+bb2.gs_svf_bell_coef(min(nyq_limit, 550 * body_scale), 5, 6 * body_amt / 100);    // upper main body resonance
+bb3.gs_svf_bell_coef(min(nyq_limit, 1500 * body_scale), 1.5, -4 * body_amt / 100); // dip below the bridge hill
+bb4.gs_svf_bell_coef(min(nyq_limit, 2500 * body_scale), 1.2, 7 * body_amt / 100); // bridge hill, gives the bite
 body_makeup = 10 ^ (-1.5 * body_amt / 100 / 20);  // offsets the boosts
 first ? (
   k = t_k; comp = t_comp; cut = t_cut; depth = t_depth;
@@ -190,12 +171,8 @@ first ? (
 x = spl0;
 
 // Input high-pass.
-v3 = x - hp_ic2;
-v1 = hp_a1 * hp_ic1 + hp_a2 * v3;
-v2 = hp_ic2 + hp_a2 * hp_ic1 + hp_a3 * v3;
-hp_ic1 = 2 * v1 - hp_ic1;
-hp_ic2 = 2 * v2 - hp_ic2;
-x = x - hp_k * v1 - v2;
+hpf.gs_svf_tick(x);
+x = hpf.hp;
 
 // Envelope follower for the sweep: peak detector with separate attack and release.
 a = abs(x);
@@ -269,30 +246,18 @@ amt = max(0, min(1, (env_db - FLOOR_DB) / RANGE_DB));
 fc = 2 ^ (cut + depth * amt);
 fc = max(20, min(nyq_limit, fc));
 
-g = tan($pi * fc / srate);
-a1 = 1 / (1 + g * (g + k));
-a2 = g * a1;
-a3 = g * a2;
-v3 = shaped - f_ic2;
-v1 = a1 * f_ic1 + a2 * v3;
-v2 = f_ic2 + a2 * f_ic1 + a3 * v3;
-f_ic1 = 2 * v1 - f_ic1;
-f_ic2 = 2 * v2 - f_ic2;
+flt.gs_svf_set(fc, k);
+flt.gs_svf_tick(shaped);
 // Band-pass is unity gain at its peak; low- and high-pass get the compensation.
-y = mode == 1 ? v1 * k : (mode == 0 ? v2 : shaped - k * v1 - v2) * comp;
+y = mode == 1 ? flt.bp * k : (mode == 0 ? flt.lp : flt.hp) * comp;
 
 // Body resonance.
 body_amt > 0 ? (
-  i = 0;
-  loop(BODY_N,
-    v3 = y - bic2[i];
-    v1 = ba1[i] * bic1[i] + ba2[i] * v3;
-    v2 = bic2[i] + ba2[i] * bic1[i] + ba3[i] * v3;
-    bic1[i] = 2 * v1 - bic1[i];
-    bic2[i] = 2 * v2 - bic2[i];
-    y += bm1[i] * v1;
-    i += 1;
-  );
+  bb0.gs_svf_tick(y); y = bb0.bell;
+  bb1.gs_svf_tick(y); y = bb1.bell;
+  bb2.gs_svf_tick(y); y = bb2.bell;
+  bb3.gs_svf_tick(y); y = bb3.bell;
+  bb4.gs_svf_tick(y); y = bb4.bell;
   y *= body_makeup;
 );
 

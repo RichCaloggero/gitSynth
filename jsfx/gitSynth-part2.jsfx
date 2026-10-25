@@ -38,6 +38,7 @@ slider20:fl_noise_ms=80<10,1000,1:log>Flute breath noise fade (ms)
 slider21:fl_pink=1<0,1,1{White,Pink}>Flute breath noise colour
 
 import cookdsp/cookdsp.jsfx-inc
+import lib/svf.jsfx-inc
 import lib/tracker.jsfx-inc
 import lib/flute.jsfx-inc
 
@@ -53,9 +54,8 @@ FMIN = 70; FMAX = 1400;
 GATE_HYST_DB = 6;
 
 // Input high-pass at 70 Hz (as Part 1).
-hp_g = tan($pi * 70 / srate); hp_k = sqrt(2);
-hp_a1 = 1 / (1 + hp_g * (hp_g + hp_k)); hp_a2 = hp_g * hp_a1; hp_a3 = hp_g * hp_a2;
-hp_ic1 = hp_ic2 = 0;
+hpf.gs_svf_init();
+hpf.gs_svf_set(70, sqrt(2));
 
 level_att_c = 1 - exp(-1 / (0.001 * srate));
 level_rel_c = 1 - exp(-1 / (0.2 * srate));
@@ -115,12 +115,8 @@ fl_n_hold = 0.06 * (fl_noise_hold / 100) ^ 2;
 
 @sample
 x = spl0;
-v3 = x - hp_ic2;
-v1 = hp_a1 * hp_ic1 + hp_a2 * v3;
-v2 = hp_ic2 + hp_a2 * hp_ic1 + hp_a3 * v3;
-hp_ic1 = 2 * v1 - hp_ic1;
-hp_ic2 = 2 * v2 - hp_ic2;
-x = x - hp_k * v1 - v2;
+hpf.gs_svf_tick(x);
+x = hpf.hp;
 
 // Gate, as Part 1: peak level with 6 dB hysteresis.
 a = abs(x);

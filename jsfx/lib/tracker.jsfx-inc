@@ -1,5 +1,5 @@
 // gitSynth shared library: coarse pitch tracker (YIN on a decimated signal).
-// Needs cookdsp (memalloc), imported before this file.
+// Needs cookdsp (memalloc) and lib/svf.jsfx-inc, imported before this file.
 //
 // Object, in cookDSP's style:
 //   gs_tracker_init(fmin fmax)
@@ -27,32 +27,10 @@ GS_TRK_THRESH = 0.15;   // YIN absolute threshold
 GS_TRK_BUF = 2048;      // decimated ring buffer (power of two)
 GS_TRK_HCHECK_HZ = 400; // harmonic check only for estimates below this
 
-function gs_trk_lp_init(fc q)
-  local(g)
-(
-  g = tan($pi * fc / srate);
-  this.k = 1 / q;
-  this.a1 = 1 / (1 + g * (g + this.k));
-  this.a2 = g * this.a1;
-  this.a3 = g * this.a2;
-  this.ic1 = this.ic2 = 0;
-);
-
-function gs_trk_lp_do(x)
-  local(v1 v2 v3)
-(
-  v3 = x - this.ic2;
-  v1 = this.a1 * this.ic1 + this.a2 * v3;
-  v2 = this.ic2 + this.a2 * this.ic1 + this.a3 * v3;
-  this.ic1 = 2 * v1 - this.ic1;
-  this.ic2 = 2 * v2 - this.ic2;
-  v2;
-);
-
 function gs_tracker_init(fmin fmax)
 (
-  this.lp1.gs_trk_lp_init(3000, 0.5412);
-  this.lp2.gs_trk_lp_init(3000, 1.3066);
+  this.lp1.gs_svf_init(); this.lp1.gs_svf_coef(3000, 0.5412);
+  this.lp2.gs_svf_init(); this.lp2.gs_svf_coef(3000, 1.3066);
   this.dec = max(1, floor(srate / GS_TRK_RATE + 0.5));
   this.fsd = srate / this.dec;
   this.tmin = max(2, floor(this.fsd / fmax));
@@ -148,7 +126,7 @@ function gs_tracker_estimate()
 function gs_tracker_do(x)
   local(y)
 (
-  y = this.lp2.gs_trk_lp_do(this.lp1.gs_trk_lp_do(x));
+  y = this.lp2.gs_svf_tick(this.lp1.gs_svf_tick(x));
   this.fresh = 0;
   this.phase += 1;
   this.phase >= this.dec ? (
@@ -190,25 +168,17 @@ GS_PLL_AVG_S = 0.01;     // average the cycles of about this long
 GS_PLL_MAXC = 16;        // most cycles averaged
 GS_PLL_FOLLOW = 0.05;    // share of the gap to the measured pitch the filter moves per cycle
 
+// One band-pass stage, unity gain at its peak.
 function gs_pll_bp(x fc)
-  local(g k a1 a2 a3 v1 v2 v3)
 (
-  g = tan($pi * fc / srate);
-  k = 1 / GS_PLL_Q;
-  a1 = 1 / (1 + g * (g + k));
-  a2 = g * a1;
-  a3 = g * a2;
-  v3 = x - this.ic2;
-  v1 = a1 * this.ic1 + a2 * v3;
-  v2 = this.ic2 + a2 * this.ic1 + a3 * v3;
-  this.ic1 = 2 * v1 - this.ic1;
-  this.ic2 = 2 * v2 - this.ic2;
-  k * v1;
+  this.gs_svf_set(fc, 1 / GS_PLL_Q);
+  this.gs_svf_tick(x);
+  this.k * this.bp;
 );
 
 function gs_pll_init()
 (
-  this.s1.ic1 = this.s1.ic2 = this.s2.ic1 = this.s2.ic2 = 0;
+  this.s1.gs_svf_init(); this.s2.gs_svf_init();
   this.fc = 0;
   this.hz = 0;
   this.locked = this.alive = 0;

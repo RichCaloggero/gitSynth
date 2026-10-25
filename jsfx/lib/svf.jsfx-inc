@@ -1,0 +1,64 @@
+// gitSynth shared library: state-variable filter (low, band, high, bell).
+// No dependencies.
+//
+// Object, in cookDSP's style:
+//   gs_svf_init()                 clears the filter's memory
+//   gs_svf_coef(fc q)             sets cutoff (Hz) and Q (0.707 = Butterworth)
+//   gs_svf_set(fc k)              same, with damping k = 1/Q (for swept filters
+//                                 whose damping is smoothed directly)
+//   gs_svf_bell_coef(fc q gain_db)  sets up a bell (peaking) filter
+//   gs_svf_tick(x)                filters one sample with the current settings;
+//                                 sets this.lp, this.bp, this.hp, this.bell
+//                                 and returns this.lp
+//
+// Andrew Simper's trapezoidal ("zero-delay feedback") state-variable filter.
+// It stays stable when its cutoff changes every sample, so it can be swept
+// by an envelope: call gs_svf_set or gs_svf_coef each sample, then tick.
+//   this.bp     band-pass, peak gain 1/k; multiply by this.k for unity gain
+//   this.bell   input plus a boost or cut around fc (valid after bell_coef)
+
+@init
+
+function gs_svf_init()
+(
+  this.ic1 = this.ic2 = 0;
+  this.m1 = 0;
+);
+
+function gs_svf_set(fc k)
+  local(g)
+(
+  g = tan($pi * fc / srate);
+  this.k = k;
+  this.a1 = 1 / (1 + g * (g + k));
+  this.a2 = g * this.a1;
+  this.a3 = g * this.a2;
+);
+
+function gs_svf_coef(fc q)
+(
+  this.gs_svf_set(fc, 1 / q);
+);
+
+function gs_svf_bell_coef(fc q gain_db)
+  local(A)
+(
+  A = 10 ^ (gain_db / 40);
+  this.gs_svf_set(fc, 1 / (q * A));
+  this.m1 = this.k * (A * A - 1);
+);
+
+function gs_svf_tick(x)
+  local(v1 v2 v3)
+(
+  v3 = x - this.ic2;
+  v1 = this.a1 * this.ic1 + this.a2 * v3;
+  v2 = this.ic2 + this.a2 * this.ic1 + this.a3 * v3;
+  this.ic1 = 2 * v1 - this.ic1;
+  this.ic2 = 2 * v2 - this.ic2;
+  this.lp = v2;
+  this.bp = v1;
+  this.hp = x - this.k * v1 - v2;
+  this.bell = x + this.m1 * v1;
+  v2;
+);

@@ -1,5 +1,5 @@
 // gitSynth shared library: vowel (formant) filter.
-// Needs cookdsp (memalloc), imported before this file.
+// Needs cookdsp (memalloc) and lib/svf.jsfx-inc, imported before this file.
 //
 // Object, in cookDSP's style:
 //   gs_vowel_init()
@@ -37,8 +37,7 @@ function gs_vowel_init()
   f[9] = 570;  f[10] = 840; f[11] = 2410;   // O
   f[12] = 300; f[13] = 870; f[14] = 2240;   // U
   this.gain = memalloc(3); this.gain[0] = 1; this.gain[1] = 0.5; this.gain[2] = 0.25;
-  this.ic1 = memalloc(3);
-  this.ic2 = memalloc(3);
+  this.b0.gs_svf_init(); this.b1.gs_svf_init(); this.b2.gs_svf_init();
   this.mix = 0;
   this.pin = this.pout = 0;
   this.agc = 1;
@@ -46,30 +45,31 @@ function gs_vowel_init()
   this.smooth = 1 - exp(-1 / (0.01 * srate));
 );
 
+// Centre frequency of formant i, glided on a log scale from the start vowel
+// to the end vowel.
+function gs_vowel_fc(f v_start v_end i t)
+(
+  min(f[3 * v_start + i] * (f[3 * v_end + i] / f[3 * v_start + i]) ^ t, 0.45 * srate);
+);
+
 function gs_vowel_do(x t v_start v_end q mix)
-  local(f gain ic1 ic2 i fc g k a1 a2 a3 v1 v2 v3 out target)
+  local(f gain k out target)
 (
   this.mix += this.smooth * (mix - this.mix);
   this.mix > 0.0001 ? (
-    f = this.f; gain = this.gain; ic1 = this.ic1; ic2 = this.ic2;
+    f = this.f; gain = this.gain;
     k = 1 / max(0.5, q);
     out = 0;
-    i = 0;
-    loop(3,
-      fc = f[3 * v_start + i] * (f[3 * v_end + i] / f[3 * v_start + i]) ^ t;
-      fc = min(fc, 0.45 * srate);
-      g = tan($pi * fc / srate);
-      a1 = 1 / (1 + g * (g + k));
-      a2 = g * a1;
-      a3 = g * a2;
-      v3 = x - ic2[i];
-      v1 = a1 * ic1[i] + a2 * v3;
-      v2 = ic2[i] + a2 * ic1[i] + a3 * v3;
-      ic1[i] = 2 * v1 - ic1[i];
-      ic2[i] = 2 * v2 - ic2[i];
-      out += gain[i] * k * v1;            // band-pass, unity gain at its peak
-      i += 1;
-    );
+    // Three band-passes (unity gain at their peaks), in parallel.
+    this.b0.gs_svf_set(gs_vowel_fc(f, v_start, v_end, 0, t), k);
+    this.b0.gs_svf_tick(x);
+    out += gain[0] * k * this.b0.bp;
+    this.b1.gs_svf_set(gs_vowel_fc(f, v_start, v_end, 1, t), k);
+    this.b1.gs_svf_tick(x);
+    out += gain[1] * k * this.b1.bp;
+    this.b2.gs_svf_set(gs_vowel_fc(f, v_start, v_end, 2, t), k);
+    this.b2.gs_svf_tick(x);
+    out += gain[2] * k * this.b2.bp;
     // Level match, held still in near-silence so noise is not boosted.
     this.pin += this.agc_c * (x * x - this.pin);
     this.pout += this.agc_c * (out * out - this.pout);
