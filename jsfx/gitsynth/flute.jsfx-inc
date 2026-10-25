@@ -3,10 +3,12 @@
 //
 // Object, in cookDSP's style:
 //   gs_flute_init()
-//   gs_flute_do(hz pressure noise)   returns one sample (DC removed)
+//   gs_flute_do(hz pressure noise pink)   returns one sample (DC removed)
 //     pressure: breath pressure; the tone starts above about 0.8 and is
 //       strong and in tune from 0.9 to 1.2;
-//     noise: breath noise, as a share of the pressure (0.01-0.3).
+//     noise: breath noise, as a share of the pressure (about 0.05 at most
+//       for a realistic flute; the caller shapes it over each note);
+//     pink: 1 for pink noise (mellower, -10 dB per decade), 0 for white.
 //
 // Julius Smith's flute, as in Romain Michon's Faust-STK port (flute.dsp):
 // the breath flow, plus 0.4 of the bore's output, travels along the
@@ -39,6 +41,7 @@ function gs_flute_init()
   this.lpx = this.lpy = 0;
   this.s = 0;                                  // bore output, used next sample
   this.dcx = this.dcy = 0;
+  this.pk0 = this.pk1 = this.pk2 = 0;          // pink noise filter state
 );
 
 // Linear-interpolated read, d samples behind the newest written sample.
@@ -51,8 +54,8 @@ function gs_flute_read(buf newest d)
   buf[i & (GS_FLUTE_BUF - 1)] * (1 - f) + buf[(i + 1) & (GS_FLUTE_BUF - 1)] * f;
 );
 
-function gs_flute_do(hz pressure noise)
-  local(period db de flow a e v y bore emb)
+function gs_flute_do(hz pressure noise pink)
+  local(period db de flow a e v y bore emb wn n)
 (
   bore = this.bore; emb = this.emb;
   period = srate / max(20, hz);
@@ -60,7 +63,13 @@ function gs_flute_do(hz pressure noise)
   de = max(1, period * 0.5 - GS_FLUTE_EMB_EXTRA);
 
   flow = pressure * 1.1;
-  flow += flow * noise * (rand(2) - 1) * 1.732;     // uniform noise, unit variance
+  wn = (rand(2) - 1) * 1.732;                       // white noise, unit variance
+  // Pink noise: Paul Kellet's economical filter, scaled to unit variance.
+  this.pk0 = 0.99765 * this.pk0 + wn * 0.0990460;
+  this.pk1 = 0.96300 * this.pk1 + wn * 0.2965164;
+  this.pk2 = 0.57000 * this.pk2 + wn * 1.0526913;
+  n = pink ? (this.pk0 + this.pk1 + this.pk2 + wn * 0.1848) * 0.3324 : wn;
+  flow += flow * noise * n;
   a = flow + GS_FLUTE_FB * this.s;
   emb[this.ew & (GS_FLUTE_BUF - 1)] = a;
   e = gs_flute_read(emb, this.ew, de);
