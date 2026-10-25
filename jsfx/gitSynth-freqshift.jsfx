@@ -1,6 +1,6 @@
 desc:gitSynth Frequency Shifter Ensemble
 // Standalone version of gitSynth Part 1's ensemble stage. The same code,
-// from gitsynth/freqshift.jsfx-inc. Mono or stereo in: the channels are
+// from lib/freqshift.jsfx-inc. Mono or stereo in: the channels are
 // mixed to mono for the shifted copies; the dry signal keeps its stereo.
 
 slider1:ens_hz=1<0.05,10,0.05:log>Shift (Hz)
@@ -13,7 +13,7 @@ slider7:ens_lfo_shape=3<0,3,1{Sine,Triangle,Random step,Random smooth}>LFO shape
 slider8:out_db=0<-24,12,0.1>Output level (dB)
 
 import cookdsp/cookdsp.jsfx-inc
-import gitsynth/freqshift.jsfx-inc
+import lib/freqshift.jsfx-inc
 
 in_pin:Left
 in_pin:Right

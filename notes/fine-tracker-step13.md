@@ -1,6 +1,6 @@
 # Fine tracker (step 13), first attempt: findings
 
-Date: 2026-10-24. Code: `gs_pll_*` in `jsfx/gitsynth/tracker.jsfx-inc`;
+Date: 2026-10-24. Code: `gs_pll_*` in `jsfx/lib/tracker.jsfx-inc`;
 switch in `jsfx/gitSynth-part2.jsfx`, slider 5 (default: coarse only).
 
 ## Design tried

@@ -38,8 +38,8 @@ slider20:fl_noise_ms=80<10,1000,1:log>Flute breath noise fade (ms)
 slider21:fl_pink=1<0,1,1{White,Pink}>Flute breath noise colour
 
 import cookdsp/cookdsp.jsfx-inc
-import gitsynth/tracker.jsfx-inc
-import gitsynth/flute.jsfx-inc
+import lib/tracker.jsfx-inc
+import lib/flute.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left

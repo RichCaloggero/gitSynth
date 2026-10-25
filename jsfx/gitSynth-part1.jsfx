@@ -46,9 +46,9 @@ slider44:vow_mix=0<0,100,1>Vowel mix (%)
 slider45:vow_q=2.5<1,12,0.1:log>Vowel band sharpness (Q, lower is smoother)
 
 import cookdsp/cookdsp.jsfx-inc
-import gitsynth/freqshift.jsfx-inc
-import gitsynth/vibrato.jsfx-inc
-import gitsynth/vowel.jsfx-inc
+import lib/freqshift.jsfx-inc
+import lib/vibrato.jsfx-inc
+import lib/vowel.jsfx-inc
 
 in_pin:Guitar
 out_pin:Left
@@ -133,16 +133,16 @@ bfreq[4] = 2500; bgain[4] = 7;  bq[4] = 1.2;   // bridge hill, gives the bite
 i = 0;
 loop(BODY_N, bic1[i] = bic2[i] = 0; i += 1;);
 
-// Frequency-shifter ensemble, from gitsynth/freqshift.jsfx-inc.
+// Frequency-shifter ensemble, from lib/freqshift.jsfx-inc.
 ens.gs_ensemble_init();
 
-// Vibrato, from gitsynth/vibrato.jsfx-inc, with its delayed onset.
+// Vibrato, from lib/vibrato.jsfx-inc, with its delayed onset.
 vib.gs_vibrato_init();
 onset_slow = 0;
 vib_timer = 0;
 vib_gain = 0;
 
-// Vowel filter, from gitsynth/vowel.jsfx-inc.
+// Vowel filter, from lib/vowel.jsfx-inc.
 vow.gs_vowel_init();
 
 

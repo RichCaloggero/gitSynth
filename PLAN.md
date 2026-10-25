@@ -150,16 +150,16 @@ Part 1, processed guitar:
 2. Envelope reshaping: attack softening or swell, sustain, and the Hold mode. Done 2026-10-23.
 3. Waveshaper. Done 2026-10-23.
 4. Body resonance. Done 2026-10-23.
-5. Frequency-shifter ensemble. Done 2026-10-23. Then moved into a shared library (`jsfx/gitsynth/freqshift.jsfx-inc`) with an LFO (sine, triangle, random step, random smooth) that wobbles each copy's shift, and also released as a standalone effect, `jsfx/gitSynth-freqshift.jsfx`.
-6. Vibrato with delayed onset. Done 2026-10-23. Shared library `jsfx/gitsynth/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
+5. Frequency-shifter ensemble. Done 2026-10-23. Then moved into a shared library (`jsfx/lib/freqshift.jsfx-inc`) with an LFO (sine, triangle, random step, random smooth) that wobbles each copy's shift, and also released as a standalone effect, `jsfx/gitSynth-freqshift.jsfx`.
+6. Vibrato with delayed onset. Done 2026-10-23. Shared library `jsfx/lib/vibrato.jsfx-inc`; shapes refer to the pitch heard (sine, triangle, random step, random smooth). A simple attack detector times the onset; step 7 will reuse and refine it.
 7. Dynamic freeze: dropped 2026-10-23 (see stage 9 above). The attack threshold slider it added stays, for the vibrato onset.
-8. Vowel filter. Done 2026-10-23. Shared library `jsfx/gitsynth/vowel.jsfx-inc`: three formant band-passes, moved by the main sweep amount, with a slow level match.
+8. Vowel filter. Done 2026-10-23. Shared library `jsfx/lib/vowel.jsfx-inc`: three formant band-passes, moved by the main sweep amount, with a slow level match.
 9. Resonator bank: deferred 2026-10-24 at Rich's request; revisit if needed later.
 10. Optional: square-up and octave-down.
 
 Part 2, tracked voice:
 
-11. Test rig: done 2026-10-24 (`tools/render.py`, REAPER headless through the `Effects/gitSynth-dev` link; `tools/compare_pitch.py`, `tools/track_all.py`; baselines in `notes/`). Coarse tracker: first version done 2026-10-24 (`jsfx/gitsynth/tracker.jsfx-inc`, test plugin `jsfx/gitSynth-part2.jsfx`); baseline `notes/tracker-step11.txt`. Original plan for this step: the coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
+11. Test rig: done 2026-10-24 (`tools/render.py`, REAPER headless through the `Effects/gitSynth-dev` link; `tools/compare_pitch.py`, `tools/track_all.py`; baselines in `notes/`). Coarse tracker: first version done 2026-10-24 (`jsfx/lib/tracker.jsfx-inc`, test plugin `jsfx/gitSynth-part2.jsfx`); baseline `notes/tracker-step11.txt`. Original plan for this step: the coarse tracker only: gate, decimation and YIN, reusing the onset detector from step 7. The output is a plain sine at the tracked pitch, plus debug channels. Measure the results.
 12. Optional spin-off: an accessible tuner JSFX built on the coarse tracker. It reports the note and cents through readable sliders and an audio cue. Done 2026-10-24 (`jsfx/gitSynth-tuner.jsfx`); Rich tunes with it.
 13. Add the PLL: seed it from YIN, lock to the fundamental's zero crossings, and add the lock detector. Measure jitter and how well bends are followed. Tried 2026-10-24 and set aside: measured worse than the coarse tracker (3-4 cents flat, more wobble on high notes), and Rich confirmed by ear that coarse alone is better. Findings in `notes/fine-tracker-step13.md`; the code remains as an off-by-default option.
 14. Note logic: the octave guard, legato detection and mute detection. Measure. Done 2026-10-24 in the Part 2 test plugin: mute at each pick, 5 ms attack skip and confirmation; within a note a 70-cent follow zone, 16 ms persistence for changes and 65 ms beyond a fifth; mute detection (12 dB fall in 40 ms). Rich: "much improved", bends and vibrato tracked fine, rare misfires only when playing sloppily. Measured with `tools/glitch.py` and `tools/onset_junk.py`; lock 6-16 ms after the pick.
