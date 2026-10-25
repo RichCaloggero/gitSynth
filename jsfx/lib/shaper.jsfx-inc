@@ -1,0 +1,59 @@
+// gitSynth shared library: waveshaper (soft clip, asymmetric, wave fold).
+// No dependencies.
+//
+// Functions:
+//   gs_soft_tanh(u)            tanh with its input clamped, so it never
+//                              overflows (cookDSP's tanh does above about 350)
+//   gs_shaper_curve(u shape)   the curve; 0 at 0 for every shape:
+//                              0 soft clip (tanh), 1 asymmetric (adds even
+//                              harmonics), 2 wave fold (sine)
+//   gs_shaper_size(v shape)    typical output size for inputs from -v to v
+//                              (fold: its largest output; otherwise the
+//                              average of the two sides). Use it for level
+//                              compensation: comp = ref / gs_shaper_size(drive * ref)
+//                              keeps a signal of level ref at about the same
+//                              level whatever the drive.
+//
+// Object, in cookDSP's style:
+//   gs_shaper_init()
+//   gs_shaper_do(x drive comp shape)   returns curve(x * drive) * comp with
+//                                      its DC removed (20 Hz blocker; the
+//                                      asymmetric curve adds a DC offset)
+
+@init
+
+GS_SHAPER_ASYM_BIAS = 0.4;   // offset for the asymmetric curve
+
+function gs_soft_tanh(u)
+  local(e)
+(
+  e = exp(2 * max(-40, min(40, u)));
+  (e - 1) / (e + 1);
+);
+
+function gs_shaper_curve(u shape)
+(
+  shape == 0 ? gs_soft_tanh(u) :
+  shape == 1 ? gs_soft_tanh(u + GS_SHAPER_ASYM_BIAS) - gs_soft_tanh(GS_SHAPER_ASYM_BIAS) :
+  sin(u);
+);
+
+function gs_shaper_size(v shape)
+(
+  shape == 2 ? sin(min(v, $pi / 2)) : (gs_shaper_curve(v, shape) - gs_shaper_curve(-v, shape)) / 2;
+);
+
+function gs_shaper_init()
+(
+  this.dc_r = exp(-2 * $pi * 20 / srate);
+  this.dcx = this.dcy = 0;
+);
+
+function gs_shaper_do(x drive comp shape)
+  local(ws)
+(
+  ws = gs_shaper_curve(x * drive, shape) * comp;
+  this.dcy = ws - this.dcx + this.dc_r * this.dcy;
+  this.dcx = ws;
+  this.dcy;
+);

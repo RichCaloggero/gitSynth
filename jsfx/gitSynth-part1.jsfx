@@ -48,6 +48,7 @@ slider45:vow_q=2.5<1,12,0.1:log>Vowel band sharpness (Q, lower is smoother)
 import cookdsp/cookdsp.jsfx-inc
 import lib/svf.jsfx-inc
 import lib/dynamics.jsfx-inc
+import lib/shaper.jsfx-inc
 import lib/freqshift.jsfx-inc
 import lib/vibrato.jsfx-inc
 import lib/vowel.jsfx-inc
@@ -66,7 +67,6 @@ NOTE_REF_SAMPLES = floor(0.03 * srate);   // how long after an attack its level 
 MAX_GAIN_DB = 30;    // most that sustain will boost a quiet note
 GATE_HYST_DB = 6;    // gate closes this far below its threshold
 SHAPER_REF = 0.25;   // typical level (-12 dBFS) kept steady as drive rises
-ASYM_BIAS = 0.4;     // offset for the asymmetric shaper; gives even harmonics
 
 smooth = 1 - exp(-1 / (SMOOTH_MS * 0.001 * srate));
 nyq_limit = 0.45 * srate;
@@ -91,24 +91,8 @@ flt.gs_svf_init();
 env_slow = 0;
 note_ref_db = -200; note_ref_n = 0;
 
-// DC blocker after the shaper, about 20 Hz.
-dc_r = exp(-2 * $pi * 20 / srate);
-dc_x1 = dc_y1 = 0;
-
-function soft_tanh(u) local(e) ( e = exp(2 * max(-40, min(40, u))); (e - 1) / (e + 1); );
-
-// Shaper curve; the result is 0 at 0 for every type.
-function shaper(u) (
-  shape == 0 ? soft_tanh(u) :
-  shape == 1 ? soft_tanh(u + ASYM_BIAS) - soft_tanh(ASYM_BIAS) :
-  sin(u);
-);
-
-// Typical output size for inputs from -v to v (fold: its largest output;
-// otherwise the average of the two sides, which differ for Asymmetric).
-function shaper_peak(v) (
-  shape == 2 ? sin(min(v, $pi / 2)) : (shaper(v) - shaper(-v)) / 2;
-);
+// Waveshaper, from lib/shaper.jsfx-inc (includes its 20 Hz DC blocker).
+sh.gs_shaper_init();
 
 // Start smoothed values at their targets so nothing sweeps on load.
 first = 1;
@@ -146,7 +130,7 @@ t_sus = env_mode ? 1 : sustain / 100;   // Hold is full sustain
 // Drive of 0 dB bypasses the shaper; otherwise keep a -12 dBFS signal at
 // about the same level whatever the drive.
 t_drive = 10 ^ (drive_db / 20);
-t_scomp = SHAPER_REF / shaper_peak(t_drive * SHAPER_REF);
+t_scomp = SHAPER_REF / gs_shaper_size(t_drive * SHAPER_REF, shape);
 t_smix = drive_db > 0 ? shaper_mix / 100 : 0;
 
 // Body bells (trapezoidal state-variable bell filters).
@@ -229,10 +213,7 @@ shaped = x * swell_gain * 10 ^ (sus_db / 20) * gate_gain;
 
 // Waveshaper, then a DC blocker for the asymmetric curve's offset.
 smix > 0.0001 ? (
-  ws = shaper(shaped * drive) * scomp;
-  dc_y1 = ws - dc_x1 + dc_r * dc_y1;
-  dc_x1 = ws;
-  shaped += smix * (dc_y1 - shaped);
+  shaped += smix * (sh.gs_shaper_do(shaped, drive, scomp, shape) - shaped);
 );
 
 // Envelope-swept state-variable filter (trapezoidal, stable when modulated).
