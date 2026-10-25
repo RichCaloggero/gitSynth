@@ -17,18 +17,39 @@ Reusable DSP building blocks for REAPER JSFX, written for gitSynth but usable in
 
 ## What is here
 
-| File | Objects | What it does |
-|---|---|---|
-| `freqshift.jsfx-inc` | `gs_hilbert`, `gs_shift`, `gs_lfo`, `gs_ensemble` | 90-degree phase splitter, frequency shifter, LFO with four shapes, and a chorus-like ensemble built from them |
-| `vibrato.jsfx-inc` | `gs_vibrato` | Stereo delay-line vibrato whose shapes describe the pitch heard |
-| `vowel.jsfx-inc` | `gs_vowel` | Three-formant vowel filter with level matching |
-| `tracker.jsfx-inc` | `gs_tracker`, `gs_pll` | Monophonic pitch tracker (YIN on a decimated signal), plus an experimental fine tracker |
-| `flute.jsfx-inc` | `gs_flute` | Waveguide flute physical model with breath noise |
+### Building blocks
+
+| File | Objects | What it does | Needs first |
+|---|---|---|---|
+| `svf.jsfx-inc` | `gs_svf` | State-variable filter: low-pass, band-pass, high-pass and bell, stable when swept every sample | nothing |
+| `dynamics.jsfx-inc` | `gs_env`, `gs_gate`, `gs_attack` | Peak envelope follower, gate with hysteresis, and attack (note onset) detector | nothing |
+| `shaper.jsfx-inc` | `gs_shaper` and curve functions | Waveshaper (soft clip, asymmetric, wave fold) with level compensation and a DC blocker | nothing |
+
+### Effects and instruments
+
+| File | Objects | What it does | Needs first |
+|---|---|---|---|
+| `freqshift.jsfx-inc` | `gs_hilbert`, `gs_shift`, `gs_lfo`, `gs_ensemble` | 90-degree phase splitter, frequency shifter, LFO with four shapes, and a chorus-like ensemble built from them | cookDSP |
+| `vibrato.jsfx-inc` | `gs_vibrato` | Stereo delay-line vibrato whose shapes describe the pitch heard | cookDSP |
+| `vowel.jsfx-inc` | `gs_vowel` | Three-formant vowel filter with level matching | cookDSP, `svf` |
+| `tracker.jsfx-inc` | `gs_tracker`, `gs_pll` | Monophonic pitch tracker (YIN on a decimated signal), plus an experimental fine tracker | cookDSP, `svf` |
+| `notes.jsfx-inc` | `gs_notes` | Note logic for the tracker: pick-noise skip, confirmation, note hold, mute detection | cookDSP |
+| `flute.jsfx-inc` | `gs_flute` | Waveguide flute physical model with breath noise | cookDSP |
 
 ## Requirements
 
 - REAPER 7 or later. Older versions should work but are untested.
-- [cookDSP](../cookdsp/) by Olivier Bélanger, which is in this repository. Every library uses its `memalloc`, and `vibrato` also uses its `delay` object.
+- [cookDSP](../cookdsp/) by Olivier Bélanger, which is in this repository. Libraries that use it need its `memalloc`, and `vibrato` also uses its `delay` object. The building blocks don't need it.
+- Libraries don't import each other. Import what each one needs before it, as listed in the "Needs first" column above. A typical order is:
+
+  ```
+  import cookdsp/cookdsp.jsfx-inc
+  import lib/svf.jsfx-inc
+  import lib/dynamics.jsfx-inc
+  import lib/tracker.jsfx-inc
+  import lib/notes.jsfx-inc
+  ```
+
 - Sample rate: tested at 48 kHz. Everything is computed from `srate`, but tunings and measurements in the comments are for 48 kHz.
 
 ## Using a library
@@ -117,6 +138,78 @@ spl1 += ens.r - m;
 - **Smoothing:** objects that take mix or level parameters smooth them internally, over about 10 to 20 ms, so you can pass slider values straight in without zipper noise.
 
 ## Library reference
+
+### svf.jsfx-inc
+
+#### gs_svf: state-variable filter
+
+- `gs_svf_init()` clears the filter's memory.
+- `gs_svf_coef(fc, q)` sets the cutoff in Hz and the Q; 0.707 gives a Butterworth response.
+- `gs_svf_set(fc, k)` does the same with the damping `k` = 1/Q. Use it when you smooth the damping yourself, for example in a resonance control.
+- `gs_svf_bell_coef(fc, q, gain_db)` sets the filter up as a bell (peaking) filter.
+- `gs_svf_tick(x)` filters one sample. It returns the low-pass and sets:
+  - `this.lp`
+  - `this.bp`: peak gain 1/k, so multiply by `this.k` for unity gain
+  - `this.hp`
+  - `this.bell`: valid after `gs_svf_bell_coef`
+
+This is Andrew Simper's trapezoidal design. It stays stable and click-free when the cutoff changes every sample, so to sweep it, call `gs_svf_set` before each `gs_svf_tick`. For a fixed filter, set it once in `@init` or `@slider`. For several bands in series, chain objects:
+
+```
+b0.gs_svf_tick(y); y = b0.bell;
+b1.gs_svf_tick(y); y = b1.bell;
+```
+
+### dynamics.jsfx-inc
+
+Times are in seconds.
+
+#### gs_env: peak envelope follower
+
+- `gs_env_init()`
+- `gs_env_set(att_s, rel_s)`
+- `gs_env_do(a)` takes the rectified input, `abs(x)`. It returns the envelope and also sets `this.env`.
+
+For guitar: 1 ms attack and 200 ms release for a level meter that catches every pick; 1 ms and 50 ms for a fast envelope.
+
+#### gs_gate: gate with hysteresis
+
+- `gs_gate_init()`
+- `gs_gate_set(thresh_db, hyst_db, att_s, rel_s)`: the gate opens above `thresh_db`, closes `hyst_db` below it, and its gain fades in over `att_s` and out over `rel_s`.
+- `gs_gate_do(level_db)` sets `this.open` (0 or 1) and `this.gain` (0 to 1, smoothed).
+
+Set the closing point above your input's noise floor, or the gate never closes. On the gitSynth clips, a 6 dB hysteresis with -45 dB opening works.
+
+#### gs_attack: attack detector
+
+- `gs_attack_init()`
+- `gs_attack_set(slow_s)` sets how quickly the slow copy follows the fast envelope; 0.03 suits guitar.
+- `gs_attack_do(fast, ratio, enabled)`:
+  - `fast` is a fast envelope, from a `gs_env` at 1 ms and 50 ms.
+  - `ratio` is how far that envelope must jump above its slow copy; 2 is 6 dB.
+  - `enabled` set to 0 suppresses detection, for example while the gate is closed.
+  - It sets `this.on` while an attack is detected (it stays on through the rise of a pick) and `this.start` on the sample where one begins.
+
+### shaper.jsfx-inc
+
+Functions:
+
+- `gs_soft_tanh(u)`: tanh that never overflows.
+- `gs_shaper_curve(u, shape)`: 0 soft clip, 1 asymmetric (adds even harmonics), 2 wave fold.
+- `gs_shaper_size(v, shape)`: the curve's typical output size for inputs up to `v`. Use it for level compensation:
+
+  ```
+  comp = ref / gs_shaper_size(drive * ref, shape);
+  ```
+
+  This keeps a signal of level `ref` at about the same level whatever the drive; gitSynth uses 0.25, which is -12 dBFS.
+
+#### gs_shaper object
+
+- `gs_shaper_init()`
+- `gs_shaper_do(x, drive, comp, shape)` returns `curve(x * drive) * comp`, with the asymmetric curve's DC offset removed by a 20 Hz blocker.
+
+There is no oversampling, so high drive, especially with wave fold, aliases on high notes. A low-pass afterwards hides most of it.
 
 ### freqshift.jsfx-inc
 
@@ -208,7 +301,7 @@ It uses typical adult male formants (Peterson and Barney, 1952), gliding on a lo
 
 **Measured on guitar:** it finds the note 6 to 16 ms after the pick, and the median error is about 1 cent.
 
-**What it does not do:** it has no note logic. Holding notes, ignoring pick noise and handling mutes belong in the plugin; see `gitSynth-part2.jsfx` for a tested version. Chords are not supported.
+**What it does not do:** it has no note logic of its own; use `gs_notes` for holding notes, ignoring pick noise and handling mutes. Chords are not supported.
 
 #### gs_pll: experimental fine tracker
 
@@ -216,6 +309,65 @@ It uses typical adult male formants (Peterson and Barney, 1952), gliding on a lo
 - `gs_pll_do(x, seed_hz, reseed)` sets `this.hz`, `this.locked` and `this.alive`.
 
 It times each cycle from its zero crossings, after band-pass filtering around the seed pitch. **It is not recommended:** it measured 3 to 4 cents flat, with more wobble than `gs_tracker` on high notes; see `notes/fine-tracker-step13.md`.
+
+### notes.jsfx-inc
+
+#### gs_notes: note logic for a monophonic tracker
+
+- `gs_notes_init()`
+- `gs_notes_do(start, gate_open, fresh, hz, aper, max_aper, skip_s, fast_env)`, called every sample:
+  - `start` is `gs_attack`'s `this.start`.
+  - `gate_open` is `gs_gate`'s `this.open`.
+  - `fresh`, `hz` and `aper` are the tracker's results.
+  - `max_aper` is the largest aperiodicity accepted; 0.2 measured best.
+  - `skip_s` is the time after each pick whose estimates are ignored; 0.005 is a good start.
+  - `fast_env` is a fast envelope, at 1 ms and 50 ms, used to detect mutes.
+- Results:
+  - `this.voiced`: 1 while a note should sound.
+  - `this.hz`: the note's pitch, held between estimates.
+  - `this.new_note`: 1 on the sample a new pitch is confirmed or a note change is accepted.
+  - `this.seed_hz`: that new pitch.
+
+The rules, measured on guitar recordings:
+
+- **At each pick:** the note is silenced and its pitch found afresh. After `skip_s`, a pitch must repeat within 50 cents for 4 estimates, about 5 ms.
+- **Within a note:**
+  - Estimates within 70 cents are followed at once, which covers bends and vibrato.
+  - A pitch further away must persist for about 16 ms, which allows hammer-ons and slides.
+  - A pitch more than a fifth away must persist for about 65 ms, which blocks octave errors and ringing lower strings.
+- **Mutes:** a fall of 12 dB within 40 ms counts as a mute and silences the note until the next pick. The first 60 ms after a pick don't count.
+
+The rule constants are `GS_NOTES_*` at the top of the file.
+
+A minimal tracked voice using it:
+
+```
+import cookdsp/cookdsp.jsfx-inc
+import lib/svf.jsfx-inc
+import lib/dynamics.jsfx-inc
+import lib/tracker.jsfx-inc
+import lib/notes.jsfx-inc
+
+@init
+__memory_next = 0;
+hpf.gs_svf_init(); hpf.gs_svf_coef(70, 0.707);
+lvl.gs_env_init(); lvl.gs_env_set(0.001, 0.2);
+fst.gs_env_init(); fst.gs_env_set(0.001, 0.05);
+gt.gs_gate_init(); gt.gs_gate_set(-45, 6, 0.002, 0.15);
+att.gs_attack_init(); att.gs_attack_set(0.03);
+trk.gs_tracker_init(70, 1400);
+nt.gs_notes_init();
+
+@sample
+hpf.gs_svf_tick(spl0); x = hpf.hp;
+a = abs(x);
+gt.gs_gate_do(20 * log10(lvl.gs_env_do(a) + 0.0000000001));
+att.gs_attack_do(fst.gs_env_do(a), 2, gt.open);
+trk.gs_tracker_do(x);
+nt.gs_notes_do(att.start, gt.open, trk.fresh, trk.hz, trk.aper, 0.2, 0.005, fst.env);
+nt.hz > 0 ? (ph += nt.hz / srate; ph >= 1 ? ph -= 1;);
+spl0 = spl1 = nt.voiced * sin(2 * $pi * ph) * lvl.env;
+```
 
 ### flute.jsfx-inc
 

@@ -16,6 +16,7 @@ gitSynth is a REAPER JSFX guitar synthesizer. Read [README.md](README.md) for th
 - **Measure, don't assume:**
   - Check changes by rendering the real JSFX with `tools/render.py` and the measurement tools. Python copies of the DSP are for exploring only.
   - REAPER must be closed to render. If it's open, ask the user to close it rather than working around it.
+- **Reorganising code:** run `tools/refactor_check.py save` before you start and `tools/refactor_check.py` after each step. The output must stay identical, below -100 dB.
 - **Physical models:** test with the noise switched off after the note starts. A noise-fed loop shows a "pitch" without oscillating.
 - **Pitch measurements:** the pYIN reference starts notes about 50 ms early. Measure from the pick (`compare_pitch.pick_times`).
 - **Git:** local operations only. Never push or touch remotes.

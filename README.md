@@ -77,15 +77,18 @@ REAPER loads JSFX from its Effects folder: in REAPER, choose Options, then Show 
 
 The DSP building blocks in `jsfx/lib` are standalone objects that any JSFX can import:
 
+- state-variable filter
+- envelope follower, gate and attack detector
+- waveshaper
 - frequency shifter, LFO and ensemble
 - vibrato
 - vowel filter
-- pitch tracker
+- pitch tracker and its note logic
 - waveguide flute
 
 The [library guide](jsfx/lib/README.md) covers how to import them, the conventions they follow, each object's functions and parameters, known pitfalls, and how to add a new library.
 
-Most of each plugin's own processing (filters, envelopes, gate, waveshaper, note logic) is still written inline in the plugin files, not in `lib`. Moving those into libraries is a planned next step.
+The plugins are built from these libraries. What remains in each plugin file is mostly that plugin's own wiring: smoothing its sliders, sustain, swell and the body resonance in Part 1; pitch shaping, oscillator choice and the flute's breath envelope in Part 2; the readout and audio cues in the tuner.
 
 ## Testing
 
@@ -113,6 +116,7 @@ The tools render clips through the real JSFX, using REAPER from the command line
   - `render_batch()` in the same file renders many clips in one REAPER run.
 - **`tools/track_all.py`:** renders every clip through Part 2 and reports, for each clip, lock time, pitch error, octave-type errors and gaps.
 - **`tools/glitch.py` and `tools/onset_junk.py`:** measure wrong-pitch sound, sound after a note ends, and behaviour just after each pick.
+- **`tools/refactor_check.py`:** for reorganising code without changing the sound. `save` renders fixed cases through all four plugins as a baseline; run it again without arguments after a change, and it reports any difference.
 
 The reference pitch marks notes about 50 ms before the actual pick, because pYIN uses centred windows. The tools measure note starts from the pick itself.
 
