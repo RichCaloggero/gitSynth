@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Wrong pitch reported near note starts.
 
 For each reference note, over the first 150 ms after its pick: the share of time the

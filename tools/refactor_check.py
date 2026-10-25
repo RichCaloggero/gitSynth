@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render fixed test cases through every plugin and compare with a baseline.
 
 Used while reorganising code: the output must not change. Settings avoid

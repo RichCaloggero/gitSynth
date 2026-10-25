@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Reference pitch for gitSynth test clips.
 
 For each WAV, writes results/reference/<clip>.csv with one row per frame

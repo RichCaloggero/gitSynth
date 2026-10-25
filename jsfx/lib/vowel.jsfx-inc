@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Rich Caloggero
+// SPDX-License-Identifier: GPL-3.0-or-later
 // gitSynth shared library: vowel (formant) filter.
 // Needs cookdsp (memalloc) and lib/svf.jsfx-inc, imported before this file.
 //

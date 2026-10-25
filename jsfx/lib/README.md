@@ -13,7 +13,7 @@ Reusable DSP building blocks for REAPER JSFX, written for gitSynth but usable in
 - [Performance](#performance)
 - [Adding a library](#adding-a-library)
 - [Testing](#testing)
-- [Credits](#credits)
+- [Credits and licence](#credits)
 
 ## What is here
 
@@ -422,6 +422,8 @@ It is Julius Smith's flute, as in Romain Michon's Faust-STK port. The bore delay
 The repository's `tools` folder renders clips through the real JSFX using REAPER from the command line, then measures the result; see the [main README](../../README.md#testing). Python copies of DSP code are useful for exploring an idea, but only a render of the JSFX tests the plugin itself.
 
 ## Credits
+
+These libraries are copyright (C) 2026 Rich Caloggero, under the GNU General Public License, version 3 or later; see the repository's [LICENSE](../../LICENSE). If you distribute a plugin that includes them, release that plugin's source under the same licence.
 
 - **cookDSP:** Olivier Bélanger, permissive licence; see its files.
 - **Hilbert all-pass coefficients:** Olli Niemitalo.

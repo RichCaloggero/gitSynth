@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render every clip through the tracker test plugin and compare with the
 reference pitch. Prints one summary line per clip, plus a total.
 

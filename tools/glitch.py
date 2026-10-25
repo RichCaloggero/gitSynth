@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """How much of the tracker voice sounds wrong.
 
 Over 10 ms frames where the voice output is above -50 dBFS:

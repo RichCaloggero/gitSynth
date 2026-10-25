@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Rich Caloggero
+// SPDX-License-Identifier: GPL-3.0-or-later
 // gitSynth shared library: note logic for a monophonic pitch tracker.
 // Needs cookdsp (memalloc), imported before this file. Designed for
 // gs_tracker (lib/tracker.jsfx-inc) and gs_attack (lib/dynamics.jsfx-inc).

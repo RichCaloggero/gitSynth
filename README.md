@@ -128,8 +128,10 @@ The reference pitch marks notes about 50 ms before the actual pick, because pYIN
 
 ## Credits and licence
 
-- **gitSynth's own code:** a licence has not been chosen yet.
-- **Third-party code and methods**, with full credits in the [library guide](jsfx/lib/README.md#credits):
+- **gitSynth's own code** (the plugins, `jsfx/lib` and `tools`) is copyright (C) 2026 Rich Caloggero. It's free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 or (at your option) any later version; see [LICENSE](LICENSE). Each source file carries the tag `SPDX-License-Identifier: GPL-3.0-or-later`.
+  - In short: you may use, change and share it, including commercially, but if you distribute a version that includes it, you must release that version's source under the same licence.
+  - It comes with no warranty.
+- **Third-party code and methods** keep their own licences and notices, with full credits in the [library guide](jsfx/lib/README.md#credits):
   - cookDSP, by Olivier Bélanger, under its own permissive licence
   - the flute, after Julius O. Smith and Romain Michon's Faust-STK port
   - the Hilbert coefficients, by Olli Niemitalo

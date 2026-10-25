@@ -1,4 +1,6 @@
 desc:gitSynth Tuner (accessible)
+// Copyright (C) 2026 Rich Caloggero
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Guitar tuner built on the gitSynth pitch tracker.
 // Readout: sliders 10-14 are written by the plugin about five times a second,
 // so a screen reader can read them in REAPER's FX parameter list.

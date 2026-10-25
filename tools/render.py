@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render a clip through a gitSynth JSFX using REAPER from the command line.
 
 Writes a small REAPER project (one track: the clip, then the plugin), runs

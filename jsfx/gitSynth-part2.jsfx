@@ -1,4 +1,6 @@
 desc:gitSynth Part 2 - tracked voice (Voice A oscillators, Voice B flute)
+// Copyright (C) 2026 Rich Caloggero
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Mono guitar in on channel 1. An oscillator at the tracked pitch, following
 // the guitar's loudness, goes to channels 1 and 2. For testing, channel 3
 // carries the pitch (Hz / 2000, 0 when no pitch) and channel 4 the

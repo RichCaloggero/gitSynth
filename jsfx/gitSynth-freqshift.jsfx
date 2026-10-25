@@ -1,4 +1,6 @@
 desc:gitSynth Frequency Shifter Ensemble
+// Copyright (C) 2026 Rich Caloggero
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Standalone version of gitSynth Part 1's ensemble stage. The same code,
 // from lib/freqshift.jsfx-inc. Mono or stereo in: the channels are
 // mixed to mono for the shifted copies; the dry signal keeps its stereo.

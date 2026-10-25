@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Rich Caloggero
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Compare a rendered tracker debug channel with the reference pitch.
 
 The render's channel 3 holds the tracked pitch (Hz / 2000, 0 = no pitch),
