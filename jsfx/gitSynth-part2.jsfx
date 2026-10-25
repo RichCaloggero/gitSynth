@@ -41,6 +41,7 @@ import cookdsp/cookdsp.jsfx-inc
 import lib/svf.jsfx-inc
 import lib/dynamics.jsfx-inc
 import lib/tracker.jsfx-inc
+import lib/notes.jsfx-inc
 import lib/flute.jsfx-inc
 
 in_pin:Guitar
@@ -69,20 +70,8 @@ voiced = 0;
 // Attack detector (as Part 1): fast envelope rising 6 dB above a 30 ms copy.
 fast_env.gs_env_init(); fast_env.gs_env_set(0.001, 0.05);
 att.gs_attack_init(); att.gs_attack_set(0.03);
-need_seed = 1;
+notes.gs_notes_init();   // note logic, from lib/notes.jsfx-inc
 pll_used = 0;
-CONFIRM = 4;         // coarse estimates a new pitch must repeat for (about 5 ms)
-HOLD_CENTS = 70;     // within a note, closer estimates are followed at once
-CHANGE_N = 12;       // a pitch further away must repeat this often (about 16 ms)
-BIG_JUMP_CENTS = 700; // a slide or hammer-on rarely jumps more than a fifth;
-BIG_JUMP_N = 48;     // a bigger jump (octave errors, a ringing low string) needs ~65 ms
-MUTE_DROP_DB = 12;   // a fall this large within MUTE_MS is a mute, not a decay
-MUTE_MS = 40;
-MUTE_IGNORE_MS = 60; // the pick's own spike falls quickly; not a mute
-chg_n = 0; chg_hz = 0; muted = 0;
-lvl_ring = memalloc(128); lvl_pos = 0; lvl_tick = 0;
-ms_samples = floor(srate / 1000);
-since_attack = 0; confirm_n = 0; cand_hz = 0;
 voice_gain = 0;
 voice_c = 1 - exp(-1 / (0.003 * srate));
 pitch = 0;
@@ -123,79 +112,26 @@ level_db = 20 * log10(level + 0.0000000001);
 ngate.gs_gate_do(level_db);
 gate_open = ngate.open;
 
-// Attack detector. At each new attack the voice is muted and the pitch is
-// found afresh: estimates from the first skip_ms (pick noise) are ignored,
-// then a pitch must repeat within 50 cents for CONFIRM estimates (about
-// 5 ms) before it is used. That pitch seeds the fine tracker and unmutes the
-// voice; from then on the voice holds the last good pitch until the next
-// attack or the gate closes.
+// Note logic, from lib/notes.jsfx-inc: at each pick the voice is muted and
+// the pitch found afresh (attack skip, then confirmation); within a note,
+// nearby pitches are followed at once and distant ones must persist; a
+// sudden fall in level (a mute) silences the voice until the next pick.
 env_fast = fast_env.gs_env_do(a);
 att.gs_attack_do(env_fast, 2, gate_open);
-// Restart only where an attack begins (it stays detected through the rise
-// of the pick, which would otherwise keep restarting the skip).
-(att.start || !gate_open) ? (
-  need_seed = 1; since_attack = 0; confirm_n = 0; pll_used = 0; voiced = 0;
-  muted = 0;
-) : since_attack += 1;
-
-// Coarse pitch.
 trk.gs_tracker_do(x);
-reseed = 0;
-trk.fresh ? (
-  coarse_ok = gate_open && trk.aper < max_aper && since_attack >= skip_ms * 0.001 * srate;
-  coarse_ok ? (
-    need_seed && !muted ? (
-      confirm_n > 0 && abs(1200 * log(trk.hz / cand_hz) / log(2)) < 50 ? (
-        confirm_n += 1;
-        cand_hz += 0.3 * (trk.hz - cand_hz);
-      ) : (
-        cand_hz = trk.hz;
-        confirm_n = 1;
-      );
-      confirm_n >= CONFIRM ? (
-        reseed = 1; need_seed = 0;
-        pitch = cand_hz; voiced = 1;
-      );
-    ) : need_seed ? 0 : (
-      // Note established. Estimates close to the note are followed at once
-      // (bends, vibrato); one further away must repeat for CHANGE_N estimates
-      // before the note changes (a hammer-on or slide), so brief junk from
-      // mutes, touched strings and pick noise is ignored.
-      abs(1200 * log(trk.hz / pitch) / log(2)) <= HOLD_CENTS ? (
-        !tracker || !pll_used ? pitch = trk.hz;
-        chg_n = 0;
-      ) : (
-        chg_n > 0 && abs(1200 * log(trk.hz / chg_hz) / log(2)) < 50 ? (
-          chg_n += 1; chg_hz += 0.3 * (trk.hz - chg_hz);
-        ) : (
-          chg_hz = trk.hz; chg_n = 1;
-        );
-        chg_n >= (abs(1200 * log(chg_hz / pitch) / log(2)) > BIG_JUMP_CENTS ? BIG_JUMP_N : CHANGE_N) ? (
-          pitch = chg_hz; cand_hz = chg_hz; reseed = 1; pll_used = 0; chg_n = 0;
-        );
-      );
-    );
-  );
-);
-pll.gs_pll_do(x, reseed ? cand_hz : trk.hz, tracker && reseed);
+notes.gs_notes_do(att.start, gate_open, trk.fresh, trk.hz, trk.aper, max_aper,
+                  skip_ms * 0.001, env_fast);
+voiced = notes.voiced;
+
+// Fine tracker (experimental): restarted at each new note from its pitch;
+// once locked, its pitch is used while it keeps measuring cycles.
+(att.start || !gate_open || notes.new_note) ? pll_used = 0;
+pll.gs_pll_do(x, notes.new_note ? notes.seed_hz : trk.hz, tracker && notes.new_note);
 tracker && voiced ? (
   pll.locked ? pll_used = 1;
   !pll.alive ? pll_used = 0;
-  pll_used ? pitch = pll.hz;
 );
-
-// Mute detection: a fall of MUTE_DROP_DB within MUTE_MS (much faster than a
-// string decays) silences the voice at once; a new pick starts it again.
-lvl_tick += 1;
-lvl_tick >= ms_samples ? (
-  lvl_tick = 0;
-  lvl_ring[lvl_pos] = 20 * log10(env_fast + 0.0000000001);
-  past = lvl_ring[(lvl_pos - MUTE_MS + 128) % 128];
-  voiced && since_attack > MUTE_IGNORE_MS * 0.001 * srate &&
-    past - lvl_ring[lvl_pos] > MUTE_DROP_DB ? (voiced = 0; need_seed = 1; confirm_n = 0; muted = 1;);
-  lvl_pos = (lvl_pos + 1) % 128;
-);
-!gate_open ? voiced = 0;
+pitch = tracker && pll_used ? pll.hz : notes.hz;
 
 // Pitch shaping: follow the playing exactly, or pull it towards the nearest
 // semitone by the snap strength; transpose; then glide between notes. A note

@@ -1,0 +1,127 @@
+// gitSynth shared library: note logic for a monophonic pitch tracker.
+// Needs cookdsp (memalloc), imported before this file. Designed for
+// gs_tracker (lib/tracker.jsfx-inc) and gs_attack (lib/dynamics.jsfx-inc).
+//
+// Object, in cookDSP's style:
+//   gs_notes_init()
+//   gs_notes_do(start gate_open fresh hz aper max_aper skip_s fast_env)
+//     start      1 on the sample a pick begins (gs_attack's this.start)
+//     gate_open  1 while the gate is open
+//     fresh, hz, aper   the tracker's this.fresh, this.hz, this.aper
+//     max_aper   largest aperiodicity accepted (0.2 measured best on guitar)
+//     skip_s     time after each pick whose estimates are ignored (pick
+//                noise lasts 3-4 ms on the high strings; 0.005 is a good start)
+//     fast_env   a fast envelope of the input (1 ms attack, 50 ms release),
+//                used to detect mutes
+//   Results, after each call:
+//     this.voiced    1 while a note should sound
+//     this.hz        the note's pitch in Hz (held between estimates)
+//     this.new_note  1 on the sample a new pitch is confirmed or a note
+//                    change is accepted (e.g. to restart a fine tracker)
+//     this.seed_hz   that new pitch
+//
+// The rules, measured on guitar clips (see notes/ and tools/glitch.py):
+// - At each pick the voice is silenced and the pitch found afresh: estimates
+//   in the first skip_s are ignored, then a pitch must repeat within 50
+//   cents for CONFIRM estimates (about 5 ms) before the note sounds.
+// - Within a note, estimates within HOLD_CENTS are followed at once (bends,
+//   vibrato). One further away must persist for CHANGE_N estimates (about
+//   16 ms; a hammer-on or slide), or BIG_JUMP_N (about 65 ms) if more than a
+//   fifth away (octave errors, a ringing lower string).
+// - A fall of MUTE_DROP_DB within MUTE_MS (much faster than a string decays)
+//   silences the note until the next pick; the first MUTE_IGNORE_MS after a
+//   pick do not count, because the pick's own spike falls quickly.
+// - The note stops when the gate closes.
+
+@init
+
+GS_NOTES_CONFIRM = 4;
+GS_NOTES_HOLD_CENTS = 70;
+GS_NOTES_CHANGE_N = 12;
+GS_NOTES_BIG_JUMP_CENTS = 700;
+GS_NOTES_BIG_JUMP_N = 48;
+GS_NOTES_MUTE_DROP_DB = 12;
+GS_NOTES_MUTE_MS = 40;
+GS_NOTES_MUTE_IGNORE_MS = 60;
+
+function gs_notes_init()
+(
+  this.voiced = 0;
+  this.hz = 0;
+  this.new_note = 0;
+  this.seed_hz = 0;
+  this.need_seed = 1;
+  this.since = 0;
+  this.confirm_n = 0;
+  this.chg_n = this.chg_hz = 0;
+  this.muted = 0;
+  this.ring = memalloc(128);       // fast envelope in dB, one value per ms
+  this.pos = this.tick = 0;
+  this.ms_samples = floor(srate / 1000);
+);
+
+function gs_notes_cents(a b)
+(
+  abs(1200 * log(a / b) / log(2));
+);
+
+function gs_notes_do(start gate_open fresh hz aper max_aper skip_s fast_env)
+  local(ok ring past)
+(
+  this.new_note = 0;
+  // A new pick, or the gate closed: silence and find the pitch afresh.
+  (start || !gate_open) ? (
+    this.need_seed = 1; this.since = 0; this.confirm_n = 0; this.voiced = 0;
+    this.muted = 0;
+  ) : this.since += 1;
+
+  fresh ? (
+    ok = gate_open && aper < max_aper && this.since >= skip_s * srate;
+    ok ? (
+      this.need_seed && !this.muted ? (
+        this.confirm_n > 0 && gs_notes_cents(hz, this.seed_hz) < 50 ? (
+          this.confirm_n += 1;
+          this.seed_hz += 0.3 * (hz - this.seed_hz);
+        ) : (
+          this.seed_hz = hz;
+          this.confirm_n = 1;
+        );
+        this.confirm_n >= GS_NOTES_CONFIRM ? (
+          this.new_note = 1; this.need_seed = 0;
+          this.hz = this.seed_hz; this.voiced = 1;
+        );
+      ) : this.need_seed ? 0 : (
+        gs_notes_cents(hz, this.hz) <= GS_NOTES_HOLD_CENTS ? (
+          this.hz = hz;
+          this.chg_n = 0;
+        ) : (
+          this.chg_n > 0 && gs_notes_cents(hz, this.chg_hz) < 50 ? (
+            this.chg_n += 1; this.chg_hz += 0.3 * (hz - this.chg_hz);
+          ) : (
+            this.chg_hz = hz; this.chg_n = 1;
+          );
+          this.chg_n >= (gs_notes_cents(this.chg_hz, this.hz) > GS_NOTES_BIG_JUMP_CENTS ?
+                         GS_NOTES_BIG_JUMP_N : GS_NOTES_CHANGE_N) ? (
+            this.hz = this.chg_hz; this.seed_hz = this.chg_hz;
+            this.new_note = 1; this.chg_n = 0;
+          );
+        );
+      );
+    );
+  );
+
+  // Mute detection, once per millisecond.
+  this.tick += 1;
+  this.tick >= this.ms_samples ? (
+    this.tick = 0;
+    ring = this.ring;
+    ring[this.pos] = 20 * log10(fast_env + 0.0000000001);
+    past = ring[(this.pos - GS_NOTES_MUTE_MS + 128) % 128];
+    this.voiced && this.since > GS_NOTES_MUTE_IGNORE_MS * 0.001 * srate &&
+      past - ring[this.pos] > GS_NOTES_MUTE_DROP_DB ? (
+        this.voiced = 0; this.need_seed = 1; this.confirm_n = 0; this.muted = 1;
+      );
+    this.pos = (this.pos + 1) % 128;
+  );
+  !gate_open ? this.voiced = 0;
+);
