@@ -1,0 +1,94 @@
+// gitSynth shared library: envelope follower, gate and attack detector.
+// No dependencies.
+//
+// Objects, in cookDSP's style:
+//
+//   gs_env: peak envelope follower
+//     gs_env_init()
+//     gs_env_set(att_s rel_s)      attack and release times, in seconds
+//     gs_env_do(a)                 a = rectified input (abs(x)); returns and
+//                                  sets this.env
+//
+//   gs_gate: gate with hysteresis and a smoothed gain
+//     gs_gate_init()
+//     gs_gate_set(thresh_db hyst_db att_s rel_s)
+//                                  opens above thresh_db, closes hyst_db below
+//                                  it; the gain fades in over att_s, out over rel_s
+//     gs_gate_do(level_db)         sets this.open (0 or 1) and this.gain (0-1)
+//
+//   gs_attack: attack (note onset) detector
+//     gs_attack_init()
+//     gs_attack_set(slow_s)        how long the slow copy takes to catch up
+//                                  (gitSynth uses 0.03)
+//     gs_attack_do(fast ratio enabled)
+//                                  fast = a fast envelope (1 ms attack, 50 ms
+//                                  release suits guitar); ratio = how far it must
+//                                  rise above its slow copy (2 = 6 dB);
+//                                  enabled = 0 suppresses detection (e.g. while
+//                                  the gate is closed). Sets this.on while an
+//                                  attack is detected (it stays on through the
+//                                  rise of a pick) and this.start = 1 only on
+//                                  the sample where one begins.
+//
+// Times are given in seconds; coefficients follow 1 - exp(-1 / (t * srate)).
+
+@init
+
+function gs_env_init()
+(
+  this.env = 0;
+);
+
+function gs_env_set(att_s rel_s)
+(
+  this.att_c = 1 - exp(-1 / (att_s * srate));
+  this.rel_c = 1 - exp(-1 / (rel_s * srate));
+);
+
+function gs_env_do(a)
+(
+  this.env += (a > this.env ? this.att_c : this.rel_c) * (a - this.env);
+);
+
+function gs_gate_init()
+(
+  this.open = 0;
+  this.gain = 0;
+);
+
+function gs_gate_set(thresh_db hyst_db att_s rel_s)
+(
+  this.thresh = thresh_db;
+  this.hyst = hyst_db;
+  this.att_c = 1 - exp(-1 / (att_s * srate));
+  this.rel_c = 1 - exp(-1 / (rel_s * srate));
+);
+
+function gs_gate_do(level_db)
+(
+  this.open ? (
+    level_db < this.thresh - this.hyst ? this.open = 0;
+  ) : (
+    level_db > this.thresh ? this.open = 1;
+  );
+  this.gain += (this.open ? this.att_c : this.rel_c) * (this.open - this.gain);
+);
+
+function gs_attack_init()
+(
+  this.slow = 0;
+  this.on = this.start = this.prev = 0;
+);
+
+function gs_attack_set(slow_s)
+(
+  this.slow_c = 1 - exp(-1 / (slow_s * srate));
+);
+
+function gs_attack_do(fast ratio enabled)
+(
+  this.slow += (fast > this.slow ? this.slow_c : 1) * (fast - this.slow);
+  this.on = enabled && fast > ratio * this.slow + 0.0001;
+  this.start = this.on && !this.prev;
+  this.prev = this.on;
+);

@@ -47,6 +47,7 @@ slider45:vow_q=2.5<1,12,0.1:log>Vowel band sharpness (Q, lower is smoother)
 
 import cookdsp/cookdsp.jsfx-inc
 import lib/svf.jsfx-inc
+import lib/dynamics.jsfx-inc
 import lib/freqshift.jsfx-inc
 import lib/vibrato.jsfx-inc
 import lib/vowel.jsfx-inc
@@ -75,22 +76,20 @@ hpf.gs_svf_init();
 hpf.gs_svf_set(HP_HZ, sqrt(2));
 
 // Fixed time constants for the reshaping detectors.
-fast_att_c = 1 - exp(-1 / (0.001 * srate));      // 1 ms
-fast_rel_c = 1 - exp(-1 / (0.05 * srate));       // 50 ms
-level_att_c = 1 - exp(-1 / (0.001 * srate));     // 1 ms: catches the pick, so no pop
-level_rel_c = 1 - exp(-1 / (0.2 * srate));       // 200 ms: little ripple on low E
-gate_att_c = 1 - exp(-1 / (0.002 * srate));      // 2 ms
-gate_rel_c = 1 - exp(-1 / (0.15 * srate));       // 150 ms
-onset_c = 1 - exp(-1 / (0.03 * srate));          // 30 ms, slow side of the attack detector
+// Envelope followers, gate and attack detector, from lib/dynamics.jsfx-inc.
+sweep_env.gs_env_init();                          // filter sweep; times from sliders
+fast_env.gs_env_init();
+fast_env.gs_env_set(0.001, 0.05);                 // swell and attack detector
+level_env.gs_env_init();
+level_env.gs_env_set(0.001, 0.2);                 // 1 ms catches the pick (no pop); 200 ms little ripple on low E
+ngate.gs_gate_init();                             // threshold from slider; 2 ms in, 150 ms out
+att.gs_attack_init();
+att.gs_attack_set(0.03);                          // 30 ms slow side of the attack detector
 vib_fall_c = 1 - exp(-1 / (0.1 * srate));        // 100 ms, vibrato fade-out on a new note
 
-env = 0;
 flt.gs_svf_init();
-env_fast = env_slow = 0;
-level = 0;
+env_slow = 0;
 note_ref_db = -200; note_ref_n = 0;
-gate_open = 0;
-gate_gain = 0;
 
 // DC blocker after the shaper, about 20 Hz.
 dc_r = exp(-2 * $pi * 20 / srate);
@@ -124,7 +123,6 @@ ens.gs_ensemble_init();
 
 // Vibrato, from lib/vibrato.jsfx-inc, with its delayed onset.
 vib.gs_vibrato_init();
-onset_slow = 0;
 vib_timer = 0;
 vib_gain = 0;
 
@@ -133,8 +131,8 @@ vow.gs_vowel_init();
 
 
 @slider
-att_c = 1 - exp(-1 / (att_ms * 0.001 * srate));
-rel_c = 1 - exp(-1 / (rel_ms * 0.001 * srate));
+sweep_env.gs_env_set(att_ms * 0.001, rel_ms * 0.001);
+ngate.gs_gate_set(gate_db, GATE_HYST_DB, 0.002, 0.15);
 swell_c = 1 - exp(-1 / (swell_ms * 0.001 * srate));
 q = 0.5 * pow(40, reso / 100);          // Q from 0.5 to 20
 t_k = 1 / q;
@@ -176,7 +174,7 @@ x = hpf.hp;
 
 // Envelope follower for the sweep: peak detector with separate attack and release.
 a = abs(x);
-env += (a > env ? att_c : rel_c) * (a - env);
+env = sweep_env.gs_env_do(a);
 
 // Smooth the slider values.
 k += smooth * (t_k - k);
@@ -192,24 +190,21 @@ scomp += smooth * (t_scomp - scomp);
 
 // Swell: a slow copy of a fast envelope rises at the note attack time but
 // falls with it at once, so their ratio fades each new attack in.
-env_fast += (a > env_fast ? fast_att_c : fast_rel_c) * (a - env_fast);
+env_fast = fast_env.gs_env_do(a);
 env_slow += (env_fast > env_slow ? swell_c : 1) * (env_fast - env_slow);
 swell_gain = env_slow / (env_fast + 0.000000001);
 
 // Sustain and gate, from the peak level before the swell.
-level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level = level_env.gs_env_do(a);
 level_db = 20 * log10(level + 0.0000000001);
-gate_open ? (
-  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
-) : (
-  level_db > gate_db ? gate_open = 1;
-);
-gate_gain += (gate_open ? gate_att_c : gate_rel_c) * (gate_open - gate_gain);
+ngate.gs_gate_do(level_db);
+gate_open = ngate.open;
+gate_gain = ngate.gain;
 
 // Attack detector for the vibrato onset: a new note is a rise of the
 // fast envelope above a 30 ms copy of it by the attack threshold.
-onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
-attack = gate_open && env_fast > onset_ratio * onset_slow + 0.0001;
+att.gs_attack_do(env_fast, onset_ratio, gate_open);
+attack = att.on;
 
 // Sustain lifts a decaying note back towards its own starting level (the
 // loudest point in the first 30 ms after its attack, less the sustain level). It

@@ -39,6 +39,7 @@ slider21:fl_pink=1<0,1,1{White,Pink}>Flute breath noise colour
 
 import cookdsp/cookdsp.jsfx-inc
 import lib/svf.jsfx-inc
+import lib/dynamics.jsfx-inc
 import lib/tracker.jsfx-inc
 import lib/flute.jsfx-inc
 
@@ -57,21 +58,17 @@ GATE_HYST_DB = 6;
 hpf.gs_svf_init();
 hpf.gs_svf_set(70, sqrt(2));
 
-level_att_c = 1 - exp(-1 / (0.001 * srate));
-level_rel_c = 1 - exp(-1 / (0.2 * srate));
-amp_att_c = 1 - exp(-1 / (0.005 * srate));
-amp_rel_c = 1 - exp(-1 / (0.03 * srate));   // the voice dies with the string
-level = amp = 0;
-gate_open = 0;
+// Envelope followers, gate and attack detector, from lib/dynamics.jsfx-inc.
+level_env.gs_env_init(); level_env.gs_env_set(0.001, 0.2);
+amp_env.gs_env_init(); amp_env.gs_env_set(0.005, 0.03);   // the voice dies with the string
+ngate.gs_gate_init();                                     // threshold from slider
 
 trk.gs_tracker_init(FMIN, FMAX);
 pll.gs_pll_init();
 voiced = 0;
 // Attack detector (as Part 1): fast envelope rising 6 dB above a 30 ms copy.
-fast_att_c = 1 - exp(-1 / (0.001 * srate));
-fast_rel_c = 1 - exp(-1 / (0.05 * srate));
-onset_c = 1 - exp(-1 / (0.03 * srate));
-env_fast = onset_slow = 0;
+fast_env.gs_env_init(); fast_env.gs_env_set(0.001, 0.05);
+att.gs_attack_init(); att.gs_attack_set(0.03);
 need_seed = 1;
 pll_used = 0;
 CONFIRM = 4;         // coarse estimates a new pitch must repeat for (about 5 ms)
@@ -85,7 +82,7 @@ MUTE_IGNORE_MS = 60; // the pick's own spike falls quickly; not a mute
 chg_n = 0; chg_hz = 0; muted = 0;
 lvl_ring = memalloc(128); lvl_pos = 0; lvl_tick = 0;
 ms_samples = floor(srate / 1000);
-since_attack = 0; confirm_n = 0; cand_hz = 0; prev_attack = 0;
+since_attack = 0; confirm_n = 0; cand_hz = 0;
 voice_gain = 0;
 voice_c = 1 - exp(-1 / (0.003 * srate));
 pitch = 0;
@@ -99,6 +96,7 @@ FLUTE_GAIN = 1;
 voice_m = 0;         // sounding pitch, in MIDI note units (69 = A4)
 
 @slider
+ngate.gs_gate_set(gate_db, GATE_HYST_DB, 0.002, 0.15);
 outg = 10 ^ (out_db / 20);
 wet = mix / 100;
 // Waveform: 0 sine (our own), otherwise cookDSP's band-limited oscillator
@@ -120,13 +118,10 @@ x = hpf.hp;
 
 // Gate, as Part 1: peak level with 6 dB hysteresis.
 a = abs(x);
-level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level = level_env.gs_env_do(a);
 level_db = 20 * log10(level + 0.0000000001);
-gate_open ? (
-  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
-) : (
-  level_db > gate_db ? gate_open = 1;
-);
+ngate.gs_gate_do(level_db);
+gate_open = ngate.open;
 
 // Attack detector. At each new attack the voice is muted and the pitch is
 // found afresh: estimates from the first skip_ms (pick noise) are ignored,
@@ -134,16 +129,14 @@ gate_open ? (
 // 5 ms) before it is used. That pitch seeds the fine tracker and unmutes the
 // voice; from then on the voice holds the last good pitch until the next
 // attack or the gate closes.
-env_fast += (a > env_fast ? fast_att_c : fast_rel_c) * (a - env_fast);
-onset_slow += (env_fast > onset_slow ? onset_c : 1) * (env_fast - onset_slow);
-attack = gate_open && env_fast > 2 * onset_slow + 0.0001;
+env_fast = fast_env.gs_env_do(a);
+att.gs_attack_do(env_fast, 2, gate_open);
 // Restart only where an attack begins (it stays detected through the rise
 // of the pick, which would otherwise keep restarting the skip).
-((attack && !prev_attack) || !gate_open) ? (
+(att.start || !gate_open) ? (
   need_seed = 1; since_attack = 0; confirm_n = 0; pll_used = 0; voiced = 0;
   muted = 0;
 ) : since_attack += 1;
-prev_attack = attack;
 
 // Coarse pitch.
 trk.gs_tracker_do(x);
@@ -207,7 +200,7 @@ lvl_tick >= ms_samples ? (
 // Pitch shaping: follow the playing exactly, or pull it towards the nearest
 // semitone by the snap strength; transpose; then glide between notes. A note
 // that starts from silence jumps straight to its pitch (no glide in).
-amp += (a > amp ? amp_att_c : amp_rel_c) * (a - amp);
+amp = amp_env.gs_env_do(a);
 pitch > 0 ? (
   m = 69 + 12 * log(pitch / 440) / log(2);
   pitch_mode ? m += snap_pct / 100 * (floor(m + 0.5) - m);

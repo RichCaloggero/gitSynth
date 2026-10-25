@@ -26,6 +26,7 @@ slider14:r_hz=0<0,2000,0.01>Frequency (Hz, read-only)
 
 import cookdsp/cookdsp.jsfx-inc
 import lib/svf.jsfx-inc
+import lib/dynamics.jsfx-inc
 import lib/tracker.jsfx-inc
 
 in_pin:Guitar
@@ -43,9 +44,8 @@ CONFIRM = 30;        // estimates a new reading must repeat for (about 40 ms)
 
 hpf.gs_svf_init();
 hpf.gs_svf_set(70, sqrt(2));
-level_att_c = 1 - exp(-1 / (0.001 * srate));
-level_rel_c = 1 - exp(-1 / (0.2 * srate));
-level = 0; gate_open = 0;
+level_env.gs_env_init(); level_env.gs_env_set(0.001, 0.2);
+ngate.gs_gate_init();                                     // threshold from slider
 
 trk.gs_tracker_init(70, 1400);
 
@@ -62,6 +62,7 @@ click_ph = 0; click_t = 1; click_f = 0;
 chime_t = 1; ref_ph = 0; ref_amp = 0;
 
 @slider
+ngate.gs_gate_set(gate_db, GATE_HYST_DB, 0.002, 0.15);
 cue_g = 10 ^ (cue_db / 20);
 guitar_g = guitar_pct / 100;
 
@@ -71,13 +72,10 @@ hpf.gs_svf_tick(x);
 x = hpf.hp;
 
 a = abs(x);
-level += (a > level ? level_att_c : level_rel_c) * (a - level);
+level = level_env.gs_env_do(a);
 level_db = 20 * log10(level + 0.0000000001);
-gate_open ? (
-  level_db < gate_db - GATE_HYST_DB ? gate_open = 0;
-) : (
-  level_db > gate_db ? gate_open = 1;
-);
+ngate.gs_gate_do(level_db);
+gate_open = ngate.open;
 
 // Pitch reading: smooth clean estimates near the current note. A reading
 // far from it (a new note, or junk as a string is stopped) counts only once
